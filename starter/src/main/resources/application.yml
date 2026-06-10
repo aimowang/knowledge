@@ -1,0 +1,30 @@
+spring:
+  ai:
+    dashscope:
+      api-key: ${OPENAI_API_KEY}
+      model: deepseek-v4-flush
+    vectorstore:
+      # Milvus 向量数据库配置（可选）
+      milvus:
+        host: localhost
+        port: 19530
+        collection-name: ai_knowledge_milvus
+        embedding-dimension: 1536  # 向量维度 取决于所选 Embedding 模型
+    embedding:
+      model: text-embedding-ada-002 # 或其spring:
+    rerank:
+      dashscope:
+        model: gte-rerank-v2
+
+# Retriever 配置
+retriever:
+  max-results: 5
+  min-score: 0.5
+  lambda: 0.5
+# 上下文压缩配置
+compressor:
+  embedding:
+    threshold: 0.6          # 句子相似度阈值，低于该值的句子丢弃
+    min-sentences: 2        # 每个文档至少保留的句子数（防止过度压缩）
+  llm:
+    max-input-tokens: 2000  # 单次 LLM 压缩调用允许的最大输入 Token（用于控制成本）
