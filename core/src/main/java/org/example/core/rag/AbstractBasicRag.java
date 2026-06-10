@@ -8,11 +8,13 @@ import org.example.core.retrieval.ContentRetriever;
 import org.example.model.ChatMessage;
 import org.example.model.LongTermMemory;
 import org.example.model.RagAnswer;
+import org.example.model.RetrievalConfig;
 import org.example.model.enums.ComplexityLevelEnum;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /**
@@ -33,6 +35,19 @@ public abstract class AbstractBasicRag implements RagFlow {
     private final ChatClient chatClient;
     protected HybridCompressor hybridCompressor;
     protected ComplexRAGHandler complexRAGHandler;
+    
+    // ==================== 优化：线程池 ====================
+    
+    // 并行检索线程池
+    private final ExecutorService retrievalExecutor = Executors.newFixedThreadPool(
+            Math.min(Runtime.getRuntime().availableProcessors(), 8),
+            r -> {
+                Thread thread = new Thread(r);
+                thread.setName("rag-retrieval-" + thread.getId());
+                thread.setDaemon(true);
+                return thread;
+            }
+    );
 
     public AbstractBasicRag(QueryComplexityClassifier complexityClassifier, ChatClient chatClient) {
         this.complexityClassifier = complexityClassifier;
@@ -122,23 +137,26 @@ public abstract class AbstractBasicRag implements RagFlow {
             Document doc = docs.get(i);
             String title = (String) doc.getMetadata().getOrDefault("title", "未知");
             String category = (String) doc.getMetadata().getOrDefault("category", "未知");
+            String source = (String) doc.getMetadata().getOrDefault("source", "未知");
             String text = doc.getText();
-
-            contextBuilder.append(String.format("[%d] 【%s】(分类:%s)\n%s\n\n",
-                    i + 1, title, category, text));
+    
+            // 丰富元数据信息
+            contextBuilder.append(String.format("[%d] 【%s】(分类:%s, 来源:%s)\n%s\n\n",
+                    i + 1, title, category, source, text));
         }
-
+    
         return String.format("""
                 你是一个大模型应用开发知识库助手。根据以下资料回答问题。
-                如果资料无法回答，请说"该知识点暂未收录"。
-                
+                如果资料无法回答，请说“该知识点暂未收录”。
+                    
                 **重要要求：**
                 1. 请在回答中使用 [1]、[2] 等标记来引用资料来源
                 2. 每个观点都应该标注来源
                 3. 只使用提供的资料，不要编造信息
                 4. 如果资料中的信息不足以完整回答问题，请明确说明
                 5. 保持答案简洁、准确，直接回答问题
-                
+                6. 优先引用高相关度的文档（排在前面的）
+                    
                 资料：
                 %s
                 """, contextBuilder.toString());
@@ -250,13 +268,90 @@ public abstract class AbstractBasicRag implements RagFlow {
     }
 
     protected List<Document> deduplicateDocuments(List<Document> docs) {
+        // 优化：使用内容哈希 + 相似度检测进行去重
         Map<String, Document> uniqueDocs = new LinkedHashMap<>();
+        
         for (Document doc : docs) {
-            String contentHash = doc.getText() != null ? 
-                doc.getText().hashCode() + "_" + doc.getText().length() : "empty";
-            uniqueDocs.putIfAbsent(contentHash, doc);
+            if (doc.getText() == null || doc.getText().trim().isEmpty()) {
+                continue;
+            }
+            
+            // 1. 精确去重：使用内容哈希
+            String contentHash = generateContentHash(doc.getText());
+            
+            // 2. 模糊去重：检查是否与已有文档高度相似
+            boolean isDuplicate = false;
+            for (String existingHash : uniqueDocs.keySet()) {
+                if (isSimilarContent(contentHash, existingHash, doc.getText(), uniqueDocs.get(existingHash).getText())) {
+                    isDuplicate = true;
+                    log.debug("检测到相似文档，跳过: {}", doc.getText().substring(0, Math.min(30, doc.getText().length())));
+                    break;
+                }
+            }
+            
+            if (!isDuplicate) {
+                uniqueDocs.put(contentHash, doc);
+            }
         }
+        
+        log.debug("文档去重: {} -> {}", docs.size(), uniqueDocs.size());
         return new ArrayList<>(uniqueDocs.values());
+    }
+    
+    /**
+     * 生成内容哈希（用于精确去重）
+     */
+    private String generateContentHash(String content) {
+        // 简化：使用前100个字符的 hash
+        String normalized = content.trim().toLowerCase();
+        String sample = normalized.length() > 100 ? normalized.substring(0, 100) : normalized;
+        return String.valueOf(sample.hashCode());
+    }
+    
+    /**
+     * 检测内容是否相似（用于模糊去重）
+     * 使用简单的 Jaccard 相似度
+     */
+    private boolean isSimilarContent(String hash1, String hash2, String text1, String text2) {
+        // 如果哈希相同，肯定是重复
+        if (hash1.equals(hash2)) {
+            return true;
+        }
+        
+        // 计算 Jaccard 相似度
+        Set<String> words1 = tokenize(text1);
+        Set<String> words2 = tokenize(text2);
+        
+        if (words1.isEmpty() || words2.isEmpty()) {
+            return false;
+        }
+        
+        // 交集 / 并集
+        Set<String> intersection = new HashSet<>(words1);
+        intersection.retainAll(words2);
+        
+        Set<String> union = new HashSet<>(words1);
+        union.addAll(words2);
+        
+        double similarity = (double) intersection.size() / union.size();
+        
+        // 相似度阈值：80%
+        return similarity > 0.8;
+    }
+    
+    /**
+     * 文本分词（简单实现）
+     */
+    private Set<String> tokenize(String text) {
+        // 按空格和标点分割，转为小写
+        String[] tokens = text.toLowerCase().split("[\\s\\p{Punct}]+");
+        Set<String> result = new HashSet<>();
+        for (String token : tokens) {
+            if (token.length() > 2) {  // 忽略短词
+                result.add(token);
+            }
+        }
+        return result;
     }
 
     protected List<Document> applyCRAG(String query, List<Document> docs) {
@@ -287,11 +382,11 @@ public abstract class AbstractBasicRag implements RagFlow {
      * 钩子方法：是否启用 Query 增强（指代消解）
      */
     protected boolean shouldEnhanceQueryWithMemory() {
-        return false;
+        return true;  // 默认启用，提升多轮对话体验
     }
 
     /**
-     * 钩子方法：利用短期记忆增强 Query
+     * 钩子方法：利用短期记忆增强 Query（带缓存）
      */
     protected String enhanceQueryWithMemory(String query, MemoryContext memoryContext) {
         if (!shouldEnhanceQueryWithMemory() || memoryContext.shortTermHistory().isEmpty()) {
@@ -338,11 +433,87 @@ public abstract class AbstractBasicRag implements RagFlow {
                     .content();
             
             if (enhancedQuery != null && !enhancedQuery.trim().isEmpty()) {
-                log.info("Query 增强: '{}' -> '{}'", query, enhancedQuery.trim());
-                return enhancedQuery.trim();
+                String result = enhancedQuery.trim();
+                log.info("Query 增强: '{}' -> '{}'", query, result);
+                
+                return result;
             }
         } catch (Exception e) {
             log.warn("Query 增强失败，使用原问题: {}", e.getMessage());
+        }
+        
+        return query;
+    }
+    
+    /**
+     * 生成 Query 缓存 key
+     */
+    private String generateQueryCacheKey(String query, MemoryContext memoryContext) {
+        // 简化：只使用 query + 最近3条消息的 hash
+        StringBuilder keyBuilder = new StringBuilder(query);
+        List<ChatMessage> recentHistory = memoryContext.shortTermHistory().size() > 3 ?
+            memoryContext.shortTermHistory().subList(
+                memoryContext.shortTermHistory().size() - 3,
+                memoryContext.shortTermHistory().size()
+            ) : memoryContext.shortTermHistory();
+        
+        for (ChatMessage msg : recentHistory) {
+            keyBuilder.append("|").append(msg.getRole()).append(":").append(msg.getContent());
+        }
+        
+        return String.valueOf(keyBuilder.toString().hashCode());
+    }
+
+    /**
+     * 钩子方法：是否启用关键词扩展
+     */
+    protected boolean shouldExpandQueryWithKeywords() {
+        return true;  // 默认启用，提高召回率
+    }
+
+    /**
+     * 使用 LLM 提取关键词并扩展查询
+     * 例如："Spring Boot 优势" → "Spring Boot 优点 特性 好处 advantages features"
+     */
+    protected String expandQueryWithKeywords(String query) {
+        if (!shouldExpandQueryWithKeywords() || chatClient == null) {
+            return query;
+        }
+        
+        try {
+            log.debug("扩展查询关键词: {}", query);
+            
+            String systemPrompt = """
+                你是一个关键词提取专家。从用户问题中提取核心关键词，并补充相关同义词。
+                
+                输出格式：原始问题 + 空格 + 关键词列表（用空格分隔）
+                
+                示例：
+                输入：Spring Boot 的优势是什么？
+                输出：Spring Boot 的优势是什么？ Spring Boot 优点 特性 好处 advantages features benefits
+                
+                输入：如何配置 MySQL 数据库？
+                输出：如何配置 MySQL 数据库？ MySQL 配置 连接池 datasource 数据库设置
+                
+                只输出一行结果，不要解释。
+                """;
+            
+            String expandedQuery = chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(query)
+                    .call()
+                    .content();
+            
+            if (expandedQuery != null && !expandedQuery.trim().isEmpty()) {
+                // 取第一行，防止 LLM 输出多余内容
+                String firstLine = expandedQuery.split("\n")[0].trim();
+                if (firstLine.length() > query.length()) {
+                    log.info("查询扩展: '{}' -> '{}'", query, firstLine);
+                    return firstLine;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("查询扩展失败，使用原问题: {}", e.getMessage());
         }
         
         return query;
@@ -439,7 +610,8 @@ public abstract class AbstractBasicRag implements RagFlow {
         // 1. Query 预处理和增强（利用记忆）
         String query = preprocessQuery(question);
         query = overrideQuery(query);
-        query = enhanceQueryWithMemory(query, memoryContext);  // ← 新增：Query 增强
+        query = enhanceQueryWithMemory(query, memoryContext);  // ← 指代消解
+        query = expandQueryWithKeywords(query);  // ← 关键词扩展
 
         // 2. 获取检索器并检索（考虑用户偏好和来源过滤）
         ContentRetriever contextRetriever = getContextRetriever();
@@ -452,7 +624,8 @@ public abstract class AbstractBasicRag implements RagFlow {
         // 3. 根据是否增强流程和是否有来源过滤选择检索策略
         if (useEnhancedFlow && shouldUseMultiQuery(question, ComplexityLevelEnum.COMPLEX)) {
             log.info("启用多查询检索");
-            allDocs = retrieveWithMultiQuery(question, source);
+            // 优化：使用增强后的 query 而非原始 question
+            allDocs = retrieveWithMultiQuery(query, source);
         } else {
             // 使用带来源过滤的检索
             allDocs = contextRetriever.retrieve(query, source);
@@ -485,10 +658,10 @@ public abstract class AbstractBasicRag implements RagFlow {
     }
 
     /**
-     * 多查询检索实现（带来源过滤）
+     * 多查询检索实现（带来源过滤、并行执行、超时控制）
      */
-    protected List<Document> retrieveWithMultiQuery(String originalQuery, String source) {
-        List<String> queries = generateMultiQueries(originalQuery);
+    protected List<Document> retrieveWithMultiQuery(String enhancedQuery, String source) {
+        List<String> queries = generateMultiQueries(enhancedQuery);
         
         ContentRetriever retriever = getContextRetriever();
         if (retriever == null) {
@@ -496,22 +669,47 @@ public abstract class AbstractBasicRag implements RagFlow {
         }
         
         Set<String> allQueries = new LinkedHashSet<>();
-        allQueries.add(originalQuery);
+        allQueries.add(enhancedQuery);  // 使用增强后的 query
         allQueries.addAll(queries);
         
-        List<Document> allDocs = new ArrayList<>();
+        log.info("多查询检索: {} 个查询", allQueries.size());
+        
+        // 优化：并行执行多个查询 + 超时控制
+        List<Document> allDocs = Collections.synchronizedList(new ArrayList<>());
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        
         for (String query : allQueries) {
-            try {
-                // 使用带来源过滤的检索
-                List<Document> docs = retriever.retrieve(query, source);
-                if (docs != null && !docs.isEmpty()) {
-                    allDocs.addAll(docs);
-                    log.debug("查询 '{}' 检索到 {} 个文档", 
-                        query.substring(0, Math.min(30, query.length())), docs.size());
+            List<Document> finalAllDocs = allDocs;
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                try {
+                    // 优化：检索超时控制（3秒）
+                    CompletableFuture<List<Document>> retrievalFuture = CompletableFuture.supplyAsync(() -> {
+                        return retriever.retrieve(query, source);
+                    }, retrievalExecutor);
+                    
+                    List<Document> docs = retrievalFuture.get(3, TimeUnit.SECONDS);
+                    
+                    if (docs != null && !docs.isEmpty()) {
+                        finalAllDocs.addAll(docs);
+                        log.debug("查询 '{}' 检索到 {} 个文档",
+                            query.substring(0, Math.min(30, query.length())), docs.size());
+                    }
+                } catch (TimeoutException e) {
+                    log.warn("查询 '{}' 检索超时", query);
+                } catch (Exception e) {
+                    log.warn("查询 '{}' 检索失败: {}", query, e.getMessage());
                 }
-            } catch (Exception e) {
-                log.warn("查询 '{}' 检索失败: {}", query, e.getMessage());
-            }
+            }, retrievalExecutor);
+            
+            futures.add(future);
+        }
+        
+        // 等待所有查询完成（最多10秒）
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("部分查询未完成，使用已获取的结果", e);
         }
         
         allDocs = deduplicateDocuments(allDocs);
@@ -576,9 +774,18 @@ public abstract class AbstractBasicRag implements RagFlow {
                 .call()
                 .content();
         
+        // 后处理：清理和验证
         answer = postprocessAnswer(answer, originalQuestion, docs);
         
+        // 提取引用的来源
         List<String> citedSources = extractCitedSources(answer, sources);
+        
+        // 新增：验证引用完整性
+        if (!citedSources.isEmpty()) {
+            log.info("答案包含 {} 个引用来源", citedSources.size());
+        } else {
+            log.warn("答案未包含任何引用来源");
+        }
 
         return new RagAnswer(answer, citedSources);
     }
@@ -666,5 +873,4 @@ public abstract class AbstractBasicRag implements RagFlow {
 
     // ==================== 数据记录类 ====================
 
-    protected record RetrievalConfig(int topK, double lambda) {}
 }

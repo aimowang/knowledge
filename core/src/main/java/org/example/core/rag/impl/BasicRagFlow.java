@@ -6,6 +6,7 @@ import org.example.core.rag.AbstractBasicRag;
 import org.example.core.rag.QueryComplexityClassifier;
 import org.example.core.retrieval.BasicContentRetriever;
 import org.example.core.retrieval.ContentRetriever;
+import org.example.model.RetrievalConfig;
 import org.example.model.enums.CategoryEnum;
 import org.example.model.enums.ComplexityLevelEnum;
 import org.springframework.ai.chat.client.ChatClient;

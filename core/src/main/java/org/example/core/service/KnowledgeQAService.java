@@ -83,7 +83,10 @@ public class KnowledgeQAService {
      */
     private String classifyQuestion(String question) {
         // 获取所有支持的分类
-        List<String> allCategories = Arrays.stream(CategoryEnum.values()).map(CategoryEnum::getValue).collect(Collectors.toList());
+        List<String> allCategories = Arrays.stream(CategoryEnum.values())
+                .map(CategoryEnum::getValue)
+                .collect(Collectors.toList());
+        
         // 构建分类提示词
         String categoriesStr = String.join(",", allCategories);
         String systemPrompt = String.format("""
@@ -104,12 +107,14 @@ public class KnowledgeQAService {
 
             // 验证返回的分类是否有效
             if (allCategories.contains(category)) {
+                log.debug("问题分类结果: {}", category);
                 return category;
             }
 
+            log.warn("LLM 返回无效分类: {}, 使用默认分类", category);
             return "all";  // 默认返回 "all"
         } catch (Exception e) {
-            System.err.println("分类失败，使用默认分类: " + e.getMessage());
+            log.error("分类失败，使用默认分类", e);
             return "all";
         }
     }

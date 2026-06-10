@@ -39,7 +39,7 @@ public class BasicContentRetriever implements ContentRetriever {
             searchRequest = SearchRequest.builder()
                     .query(query)
                     .topK(topK)
-                    .filterExpression("metadata['source'] == 'spring-boot.pdf'")  // ← 原生过滤
+                    .filterExpression(String.format("metadata['source'] == '%s'", source))  // ← 原生过滤
                     .build();
         } else {
             searchRequest = SearchRequest.builder()
