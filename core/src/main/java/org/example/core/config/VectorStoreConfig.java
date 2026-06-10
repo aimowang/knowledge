@@ -4,18 +4,18 @@ import io.milvus.client.MilvusServiceClient;
 import io.milvus.param.ConnectParam;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.milvus.MilvusVectorStore;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
-//@Configuration
+@Configuration
 public class VectorStoreConfig {
-    @Autowired
-    private MilvusVectorStoreProperties vectorStoreProperties;
 
     @Bean
-    public MilvusServiceClient milvusClient() {
+    public MilvusServiceClient milvusClient(@Value("${spring.ai.vectorstore.milvus.host}") String host,
+                                            @Value("${spring.ai.vectorstore.milvus.port}") Integer port) {
         ConnectParam param = ConnectParam.newBuilder()
-                .withHost(vectorStoreProperties.getHost()).withPort(vectorStoreProperties.getPort()).build();
+                .withHost(host).withPort(port).build();
         return new MilvusServiceClient(param);
     }
 

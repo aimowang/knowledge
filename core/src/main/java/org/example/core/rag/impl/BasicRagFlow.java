@@ -29,10 +29,10 @@ public class BasicRagFlow extends AbstractBasicRag {
     }
 
     @Override
-    public ContentRetriever getContextRetriever(String category) {
+    public ContentRetriever getContextRetriever() {
         // 可以根据分类返回不同的 Retriever
         // 这里简单返回默认的 retriever
-        log.debug("获取分类 [{}] 的检索器", category);
+        log.debug("获取分类的检索器");
         return contentRetriever;
     }
 
@@ -47,13 +47,4 @@ public class BasicRagFlow extends AbstractBasicRag {
         return List.of(CategoryEnum.ALL.getValue());
     }
 
-    /**
-     * 可选：重写分类方法，实现智能分类
-     */
-    @Override
-    public String classifyQuestion(String question) {
-        // 这里可以调用 LLM 进行分类
-        // 为了演示，我们简单返回 "all"
-        return "all";
-    }
 }
