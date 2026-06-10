@@ -1,6 +1,7 @@
 package org.example.api.controller;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.model.AskRequest;
 import org.example.model.RagAnswer;
 import org.example.model.RagEvaluation;
 import org.example.core.evaluation.EvaluationManager;
@@ -27,20 +28,11 @@ public class KnowledgeQAController {
     }
     
     /**
-     * 普通问答（不带来源）
-     */
-    @GetMapping("/ask")
-    public String ask(@RequestParam String question, 
-                     @RequestParam(defaultValue = "default_user") String userId) {
-        return qaService.askInFlowWithMemory(userId, question);
-    }
-    
-    /**
      * 带记忆的问答（推荐）
      */
-    @PostMapping("/ask-with-memory")
-    public String askWithMemory(@RequestBody AskRequest request) {
-        return qaService.askInFlowWithMemory(request.getUserId(), request.getQuestion());
+    @PostMapping("/ask")
+    public RagAnswer askWithMemory(@RequestBody AskRequest request) {
+        return qaService.askInFlowWithSources(request.getUserId(), request.getQuestion(), request.getSource());
     }
     
     /**
@@ -48,38 +40,8 @@ public class KnowledgeQAController {
      */
     @DeleteMapping("/session/{userId}")
     public String clearSession(@PathVariable String userId) {
-        // TODO: 注入 memoryManager 并调用 clearSession
+        evaluationManager.clearUserEvaluations(userId);
         return "会话已清空";
-    }
-    
-    /**
-     * 请求对象
-     */
-    @lombok.Data
-    public static class AskRequest {
-        private String userId;
-        private String question;
-    }
-    
-    /**
-     * 带来源的问答（推荐）
-     * 返回格式化的答案，包含参考资料
-     */
-    @GetMapping("/ask-with-sources")
-    public String askWithSources(@RequestParam String question) {
-        RagAnswer result = qaService.askInFlowWithSources(question);
-        
-        // 返回带引用格式的答案
-        return result.formatWithCitations();
-    }
-    
-    /**
-     * 结构化答案（JSON 格式）
-     * 适合前端自定义展示
-     */
-    @GetMapping("/ask-structured")
-    public RagAnswer askStructured(@RequestParam String question) {
-        return qaService.askInFlowWithSources(question);
     }
     
     /**

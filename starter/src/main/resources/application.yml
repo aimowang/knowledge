@@ -29,6 +29,16 @@ compressor:
   llm:
     max-input-tokens: 2000  # 单次 LLM 压缩调用允许的最大输入 Token（用于控制成本）
 
+# 外部搜索配置
+external:
+  search:
+    api-key: ${EXTERNAL_SEARCH_API_KEY:}  # Tavily 或 Bing API Key
+    provider: tavily  # tavily 或 bing
+    tavily:
+      url: https://api.tavily.com/search
+    bing:
+      url: https://api.bing.microsoft.com/v7.0/search
+
 # 日志配置
 logging:
   level:

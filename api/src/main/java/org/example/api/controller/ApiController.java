@@ -2,9 +2,6 @@ package org.example.api.controller;
 
 import jakarta.annotation.Resource;
 import org.example.core.service.KnowledgeEmbeddingService;
-import org.example.core.service.KnowledgeQAService;
-import org.example.model.QuestionRequest;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,13 +16,6 @@ public class ApiController {
 
     @Resource
     private KnowledgeEmbeddingService knowledgeEmbeddingService;
-    @Resource
-    private KnowledgeQAService qaService;
-
-    @PostMapping("/ask")
-    public ResponseEntity<String> ask(@RequestBody QuestionRequest request) {
-        return ResponseEntity.ok(qaService.ask(request.getQuestion()));
-    }
 
     @PostMapping("/upload")
     public void upload(MultipartFile file) throws IOException {

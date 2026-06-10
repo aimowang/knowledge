@@ -26,7 +26,7 @@ public class KnowledgeRefiner {
         List<Document> refinedDocs = extractRelevantSentences(question, originalDocs);
         // 策略2：重写查询再检索 todo: 重写
         String refinedQuery = rewriteQuery(question);
-        return retriever.retrieve(refinedQuery);
+        return retriever.retrieve(refinedQuery, null);
     }
 
     private String rewriteQuery(String question) {

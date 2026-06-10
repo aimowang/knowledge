@@ -1,158 +1,617 @@
 package org.example.core.rag;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.core.compress.HybridCompressor;
+import org.example.core.rag.handler.ComplexRAGHandler;
 import org.example.core.rerank.ReRanker;
 import org.example.core.retrieval.ContentRetriever;
+import org.example.model.ChatMessage;
+import org.example.model.LongTermMemory;
 import org.example.model.RagAnswer;
 import org.example.model.enums.ComplexityLevelEnum;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 
-import java.util.List;
-import java.util.function.BiFunction;
+import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * RAG 流程抽象基类 - 模板方法模式
+ * 
+ * 设计原则：
+ * 1. 统一的 RAG 流程实现，通过参数区分标准/增强模式
+ * 2. 提供可定制的钩子方法（protected 方法）
+ * 3. 支持记忆管理和质量评估的集成
+ * 4. 消除代码重复，提高可维护性
+ */
 @Slf4j
 public abstract class AbstractBasicRag implements RagFlow {
 
-    /**
-     * 执行完整的 RAG 流程
-     */
-    public String executeRag(String question, BiFunction<String, String, String> chatModel) {
-        RagAnswer result = executeRagWithSources(question, chatModel);
-        return result.getAnswer();
+    // ==================== 依赖注入 ====================
+    
+    private final QueryComplexityClassifier complexityClassifier;
+    private final ChatClient chatClient;
+    protected HybridCompressor hybridCompressor;
+    protected ComplexRAGHandler complexRAGHandler;
+
+    public AbstractBasicRag(QueryComplexityClassifier complexityClassifier, ChatClient chatClient) {
+        this.complexityClassifier = complexityClassifier;
+        this.chatClient = chatClient;
+    }
+
+    public AbstractBasicRag(QueryComplexityClassifier complexityClassifier, ChatClient chatClient,
+                           HybridCompressor hybridCompressor) {
+        this.complexityClassifier = complexityClassifier;
+        this.chatClient = chatClient;
+        this.hybridCompressor = hybridCompressor;
+    }
+
+    public AbstractBasicRag(QueryComplexityClassifier complexityClassifier, ChatClient chatClient,
+                           ComplexRAGHandler complexRAGHandler) {
+        this.complexityClassifier = complexityClassifier;
+        this.chatClient = chatClient;
+        this.complexRAGHandler = complexRAGHandler;
+    }
+
+    // ==================== RagFlow 接口实现 ====================
+
+    @Override
+    public RagAnswer executeRag(String question, String userId, String source) {
+        log.debug("开始执行 RAG 流程 - 用户: {}, 来源: {}, 问题: {}", userId, source,
+            question.substring(0, Math.min(50, question.length())));
+        
+        // 1. 获取记忆上下文（如果启用）
+        MemoryContext memoryContext = loadMemoryContext(userId, question);
+        
+        // 2. 复杂度分类（自适应路由）
+        ComplexityLevelEnum complexity = classifyComplexity(question);
+        
+        // 3. 根据复杂度选择处理策略（注入记忆和来源过滤）
+        RagAnswer result = switch (complexity) {
+            case SIMPLE -> handleSimpleQuestion(question, memoryContext);
+            case MODERATE -> handleModerateQuestion(question, memoryContext, source);
+            case COMPLEX -> handleComplexQuestion(question, memoryContext, source);
+        };
+        
+        // 4. 保存对话到记忆（如果启用）
+        if (userId != null && shouldUseShortTermMemory()) {
+            saveToShortTermMemory(userId, question, result.getAnswer());
+            
+            // 提取长期记忆
+            List<ChatMessage> history = getShortTermHistory(userId);
+            if (!history.isEmpty()) {
+                extractLongTermMemories(userId, history);
+            }
+        }
+        
+        // 5. 触发质量评估（如果启用）
+        if (userId != null && shouldEnableEvaluation()) {
+            triggerEvaluation(userId, question, result.getAnswer(), null);
+        }
+        
+        log.debug("RAG 流程完成 - 来源数: {}", result.getSources().size());
+        return result;
     }
 
     /**
-     * 执行 RAG 流程并返回带来源的答案
+     * 加载记忆上下文（内部方法）
      */
-    public RagAnswer executeRagWithSources(String question, BiFunction<String, String, String> chatModel) {
-        // 0. 问题复杂度分类（自适应路由）
-        ComplexityLevelEnum complexity = classifyComplexity(question);
+    private MemoryContext loadMemoryContext(String userId, String question) {
+        if (userId == null) {
+            return MemoryContext.EMPTY;
+        }
+        
+        List<ChatMessage> shortTermHistory = shouldUseShortTermMemory() ? 
+            getShortTermHistory(userId) : List.of();
+        List<LongTermMemory> longTermMemories = shouldUseLongTermMemory() ? 
+            getLongTermMemories(userId, question) : List.of();
+        
+        if (!shortTermHistory.isEmpty()) {
+            log.debug("加载短期记忆: {} 条消息", shortTermHistory.size());
+        }
+        if (!longTermMemories.isEmpty()) {
+            log.debug("加载长期记忆: {} 条", longTermMemories.size());
+        }
+        
+        return new MemoryContext(shortTermHistory, longTermMemories);
+    }
 
-        // 根据复杂度选择不同的处理策略
+    private String buildSystemMessage(List<Document> docs) {
+        StringBuilder contextBuilder = new StringBuilder();
+        for (int i = 0; i < docs.size(); i++) {
+            Document doc = docs.get(i);
+            String title = (String) doc.getMetadata().getOrDefault("title", "未知");
+            String category = (String) doc.getMetadata().getOrDefault("category", "未知");
+            String text = doc.getText();
+
+            contextBuilder.append(String.format("[%d] 【%s】(分类:%s)\n%s\n\n",
+                    i + 1, title, category, text));
+        }
+
+        return String.format("""
+                你是一个大模型应用开发知识库助手。根据以下资料回答问题。
+                如果资料无法回答，请说"该知识点暂未收录"。
+                
+                **重要要求：**
+                1. 请在回答中使用 [1]、[2] 等标记来引用资料来源
+                2. 每个观点都应该标注来源
+                3. 只使用提供的资料，不要编造信息
+                4. 如果资料中的信息不足以完整回答问题，请明确说明
+                5. 保持答案简洁、准确，直接回答问题
+                
+                资料：
+                %s
+                """, contextBuilder.toString());
+    }
+
+    private String buildUserMessage(String query, List<Document> docs) {
+        return String.format("用户问题：%s\n答案：", query);
+    }
+
+    /**
+     * 记忆上下文记录类
+     */
+    protected record MemoryContext(List<ChatMessage> shortTermHistory, 
+                                  List<LongTermMemory> longTermMemories) {
+        static final MemoryContext EMPTY = new MemoryContext(List.of(), List.of());
+    }
+
+    // ==================== RagFlow 接口实现 ====================
+
+    @Override
+    public String overrideQuery(String query) {
+        return query;
+    }
+
+    @Override
+    public List<String> multiQuery(String query) {
+        return generateMultiQueries(query);
+    }
+
+    @Override
+    public ReRanker getReRanker() {
+        return null;
+    }
+
+    // ==================== 钩子方法（子类可重写）====================
+
+    protected ComplexityLevelEnum classifyComplexity(String question) {
+        try {
+            ComplexityLevelEnum complexity = complexityClassifier.classify(question);
+            log.info("问题复杂度分类: {} - 问题: {}", complexity, question.substring(0, Math.min(50, question.length())));
+            return complexity;
+        } catch (Exception e) {
+            log.error("复杂度分类失败，降级为 MODERATE", e);
+            return ComplexityLevelEnum.MODERATE;
+        }
+    }
+
+    protected boolean shouldUseMultiQuery(String question, ComplexityLevelEnum complexity) {
+        return complexity == ComplexityLevelEnum.COMPLEX;
+    }
+
+    protected boolean shouldUseCRAG(ComplexityLevelEnum complexity) {
+        return complexity == ComplexityLevelEnum.COMPLEX && complexRAGHandler != null;
+    }
+
+    protected RetrievalConfig getRetrievalConfig(ComplexityLevelEnum complexity) {
         return switch (complexity) {
-            case SIMPLE -> handleSimpleQuestionWithSources(question, chatModel);
-            case MODERATE -> handleModerateQuestionWithSources(question, chatModel);
-            case COMPLEX -> handleComplexQuestionWithSources(question, chatModel);
+            case SIMPLE -> new RetrievalConfig(0, 0.0);
+            case MODERATE -> new RetrievalConfig(5, 0.7);
+            case COMPLEX -> new RetrievalConfig(10, 0.8);
         };
     }
 
-    protected ComplexityLevelEnum classifyComplexity(String question) {
-        return ComplexityLevelEnum.SIMPLE;
+    protected List<String> generateMultiQueries(String originalQuery) {
+        if (chatClient == null) {
+            log.warn("ChatClient 未配置，无法生成多查询");
+            return List.of();
+        }
+        
+        try {
+            log.info("生成多查询以提升召回率: {}", originalQuery);
+            
+            String systemPrompt = """
+                你是一个查询扩展专家。基于用户的原始问题，生成 3-5 个不同角度的变体问题。
+                这些变体应该：
+                1. 保持原问题的核心意图
+                2. 使用不同的措辞和表达方式
+                3. 从不同角度或粒度提问
+                4. 有助于检索更全面的信息
+                
+                只返回问题列表，每行一个，不要编号或其他内容。
+                """;
+            
+            String userPrompt = "原始问题：" + originalQuery;
+            
+            String response = chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(userPrompt)
+                    .call()
+                    .content();
+            
+            if (response == null || response.trim().isEmpty()) {
+                return List.of();
+            }
+            
+            List<String> queries = Arrays.stream(response.split("\n"))
+                    .map(String::trim)
+                    .filter(line -> !line.isEmpty() && line.length() > 5)
+                    .limit(5)
+                    .collect(Collectors.toList());
+            
+            log.info("生成了 {} 个变体查询", queries.size());
+            return queries;
+            
+        } catch (Exception e) {
+            log.error("多查询生成失败，返回空列表", e);
+            return List.of();
+        }
+    }
+
+    protected List<Document> deduplicateDocuments(List<Document> docs) {
+        Map<String, Document> uniqueDocs = new LinkedHashMap<>();
+        for (Document doc : docs) {
+            String contentHash = doc.getText() != null ? 
+                doc.getText().hashCode() + "_" + doc.getText().length() : "empty";
+            uniqueDocs.putIfAbsent(contentHash, doc);
+        }
+        return new ArrayList<>(uniqueDocs.values());
+    }
+
+    protected List<Document> applyCRAG(String query, List<Document> docs) {
+        if (complexRAGHandler != null) {
+            log.info("启用 CRAG 流程进行检索质量评估和修正");
+            return complexRAGHandler.handle(query, docs);
+        }
+        return docs;
+    }
+
+    // ==================== 记忆管理钩子 ====================
+
+    protected boolean shouldUseShortTermMemory() { return false; }
+    protected boolean shouldUseLongTermMemory() { return false; }
+    protected List<ChatMessage> getShortTermHistory(String userId) { return List.of(); }
+    protected List<LongTermMemory> getLongTermMemories(String userId, String question) { return List.of(); }
+    
+    protected String buildPromptWithMemories(String baseSystemPrompt, 
+                                            List<ChatMessage> shortTermHistory,
+                                            List<LongTermMemory> longTermMemories) {
+        return baseSystemPrompt;
+    }
+    
+    protected void saveToShortTermMemory(String userId, String question, String answer) {}
+    protected void extractLongTermMemories(String userId, List<ChatMessage> conversationHistory) {}
+
+    /**
+     * 钩子方法：是否启用 Query 增强（指代消解）
+     */
+    protected boolean shouldEnhanceQueryWithMemory() {
+        return false;
     }
 
     /**
-     * 处理简单问题（直接回答，无需检索）
+     * 钩子方法：利用短期记忆增强 Query
      */
-    protected String handleSimpleQuestion(String question, BiFunction<String, String, String> chatModel) {
-        String systemPrompt = "你是一个简洁的助手。请直接回答问题，保持简短。";
+    protected String enhanceQueryWithMemory(String query, MemoryContext memoryContext) {
+        if (!shouldEnhanceQueryWithMemory() || memoryContext.shortTermHistory().isEmpty()) {
+            return query;
+        }
+        
+        try {
+            log.debug("使用短期记忆增强 Query: {}", query);
+            
+            String systemPrompt = """
+                你是一个查询优化专家。根据对话历史，完善用户当前问题的指代和上下文。
+                
+                规则：
+                1. 如果当前问题包含指代词（如“它”、“这个”、“前者”等），用对话历史中的具体内容替换
+                2. 如果当前问题省略了主语或关键信息，从对话历史中补充
+                3. 如果当前问题是完整的，直接返回原问题
+                4. 只返回优化后的问题，不要有其他内容
+                """;
+            
+            StringBuilder historyBuilder = new StringBuilder();
+            List<ChatMessage> recentHistory = memoryContext.shortTermHistory().size() > 5 ?
+                memoryContext.shortTermHistory().subList(
+                    memoryContext.shortTermHistory().size() - 5,
+                    memoryContext.shortTermHistory().size()
+                ) : memoryContext.shortTermHistory();
+            
+            for (ChatMessage msg : recentHistory) {
+                historyBuilder.append(msg.getRole()).append(": ").append(msg.getContent()).append("\n");
+            }
+            
+            String userPrompt = String.format("""
+                对话历史：
+                %s
+                
+                当前问题：%s
+                
+                优化后的问题：
+                """, historyBuilder.toString(), query);
+            
+            String enhancedQuery = chatClient.prompt()
+                    .system(systemPrompt)
+                    .user(userPrompt)
+                    .call()
+                    .content();
+            
+            if (enhancedQuery != null && !enhancedQuery.trim().isEmpty()) {
+                log.info("Query 增强: '{}' -> '{}'", query, enhancedQuery.trim());
+                return enhancedQuery.trim();
+            }
+        } catch (Exception e) {
+            log.warn("Query 增强失败，使用原问题: {}", e.getMessage());
+        }
+        
+        return query;
+    }
+
+    /**
+     * 钩子方法：是否启用个性化检索
+     */
+    protected boolean shouldPersonalizeRetrieval() {
+        return false;
+    }
+
+    /**
+     * 钩子方法：根据长期记忆调整文档排序
+     */
+    protected List<Document> applyUserPreferenceToDocs(List<Document> docs, 
+                                                       List<LongTermMemory> longTermMemories) {
+        return docs;
+    }
+
+    // ==================== 质量评估钩子 ====================
+
+    protected boolean shouldEnableEvaluation() { return false; }
+    protected void triggerEvaluation(String userId, String question, String answer, String groundTruth) {}
+
+    // ==================== 统一的核心流程 ====================
+
+    /**
+     * 处理简单问题
+     */
+    protected RagAnswer handleSimpleQuestion(String question, MemoryContext memoryContext) {
+        String baseSystemPrompt = "你是一个简洁的助手。请直接回答问题，保持简短。";
+        String enhancedSystemPrompt = buildPromptWithMemories(
+            baseSystemPrompt, 
+            memoryContext.shortTermHistory(), 
+            memoryContext.longTermMemories()
+        );
+        
         String userPrompt = "问题：" + question;
-        return chatModel.apply(systemPrompt, userPrompt);
-    }
-
-    protected RagAnswer handleSimpleQuestionWithSources(String question, BiFunction<String, String, String> chatModel) {
-        String answer = handleSimpleQuestion(question, chatModel);
-        return new RagAnswer(answer, List.of());  // 简单问题没有来源
-    }
-
-    /**
-     * 处理中等复杂度问题（标准 RAG 流程）
-     */
-    protected String handleModerateQuestion(String question, BiFunction<String, String, String> chatModel) {
-        return executeStandardRag(question, chatModel, 5, 0.7);
-    }
-
-    protected RagAnswer handleModerateQuestionWithSources(String question, BiFunction<String, String, String> chatModel) {
-        return executeStandardRagWithSources(question, chatModel, 5, 0.7);
+        String answer = chatClient.prompt()
+                .system(enhancedSystemPrompt)
+                .user(userPrompt)
+                .call()
+                .content();
+        return new RagAnswer(answer, List.of());
     }
 
     /**
-     * 处理复杂问题（增强 RAG 流程：多查询、更多文档、更严格的重排序）
+     * 处理中等复杂度问题（带来源过滤）
      */
-    protected String handleComplexQuestion(String question, BiFunction<String, String, String> chatModel) {
-        return executeEnhancedRag(question, chatModel, 10, 0.8);
-    }
-
-    protected RagAnswer handleComplexQuestionWithSources(String question, BiFunction<String, String, String> chatModel) {
-        return executeEnhancedRagWithSources(question, chatModel, 10, 0.8);
+    protected RagAnswer handleModerateQuestion(String question, MemoryContext memoryContext, String source) {
+        log.debug("处理中等复杂度问题: {}, 来源: {}", question.substring(0, Math.min(50, question.length())), source);
+        return executeByComplexity(question, memoryContext, ComplexityLevelEnum.MODERATE, false, source);
     }
 
     /**
-     * 标准 RAG 流程
+     * 处理复杂问题（带来源过滤）
      */
-    private String executeStandardRag(String question, BiFunction<String, String, String> chatModel, int topK, double lambda) {
-        RagAnswer result = executeStandardRagWithSources(question, chatModel, topK, lambda);
-        return result.getAnswer();
+    protected RagAnswer handleComplexQuestion(String question, MemoryContext memoryContext, String source) {
+        log.debug("处理复杂问题: {}, 来源: {}", question.substring(0, Math.min(50, question.length())), source);
+        return executeByComplexity(question, memoryContext, ComplexityLevelEnum.COMPLEX, true, source);
     }
 
     /**
-     * 标准 RAG 流程（带来源）
+     * 根据复杂度执行 RAG 流程（通用方法，带来源过滤）
+     * @param question 问题
+     * @param memoryContext 记忆上下文
+     * @param complexity 复杂度级别
+     * @param useEnhancedFlow 是否使用增强流程
+     * @param source 文档来源过滤（可选）
      */
-    private RagAnswer executeStandardRagWithSources(String question, BiFunction<String, String, String> chatModel, int topK, double lambda) {
-        // 1. Query 预处理
+    private RagAnswer executeByComplexity(String question, MemoryContext memoryContext, 
+                                         ComplexityLevelEnum complexity, boolean useEnhancedFlow,
+                                         String source) {
+        RetrievalConfig config = getRetrievalConfig(complexity);
+        return executeRagFlow(question, memoryContext, config.topK(), config.lambda(), useEnhancedFlow, source);
+    }
+
+    /**
+     * 统一的 RAG 流程实现（核心方法，带来源过滤）
+     * @param question 问题
+     * @param memoryContext 记忆上下文
+     * @param topK 检索文档数量
+     * @param lambda 重排序参数
+     * @param useEnhancedFlow 是否使用增强流程（多查询+CRAG）
+     * @param source 文档来源过滤（可选）
+     */
+    protected RagAnswer executeRagFlow(String question,
+                                      MemoryContext memoryContext,
+                                      int topK, double lambda, boolean useEnhancedFlow,
+                                      String source) {
+        log.debug("执行 RAG 流程 - 增强: {}, topK: {}, lambda: {}, 来源: {}", useEnhancedFlow, topK, lambda, source);
+        
+        // 1. Query 预处理和增强（利用记忆）
         String query = preprocessQuery(question);
-
-        // 2. Query 重写（可选）
         query = overrideQuery(query);
+        query = enhanceQueryWithMemory(query, memoryContext);  // ← 新增：Query 增强
 
-        // 3. 多 Query 生成（可选，用于提升召回率）
-//        List<String> multiQuery = multiQuery(query);
-//        StringBuilder qBuilder = new StringBuilder(query);
-//        for (String q : multiQuery) {
-//            qBuilder.append("\n").append(q);
-//        }
-//        String queryInfo = qBuilder.toString();
-
-        // 4. 获取检索器
+        // 2. 获取检索器并检索（考虑用户偏好和来源过滤）
         ContentRetriever contextRetriever = getContextRetriever();
         if (contextRetriever == null) {
             return new RagAnswer("未配置检索器，无法回答问题", List.of());
         }
 
-        // 5. 文档召回
-        List<Document> docs = contextRetriever.retrieve(query);
+        List<Document> allDocs;
+        
+        // 3. 根据是否增强流程和是否有来源过滤选择检索策略
+        if (useEnhancedFlow && shouldUseMultiQuery(question, ComplexityLevelEnum.COMPLEX)) {
+            log.info("启用多查询检索");
+            allDocs = retrieveWithMultiQuery(question, source);
+        } else {
+            // 使用带来源过滤的检索
+            allDocs = contextRetriever.retrieve(query, source);
+        }
 
-        // 6. 空结果检查
-        if (docs == null || docs.isEmpty()) {
+        // 4. 空结果检查
+        if (allDocs == null || allDocs.isEmpty()) {
             return new RagAnswer("该知识点暂未收录", List.of());
         }
 
-        // 7. 文档过滤（可选）
-        docs = filterDocuments(docs, query);
+        // 5. 应用 CRAG（如果启用且是增强流程）
+        if (useEnhancedFlow && shouldUseCRAG(ComplexityLevelEnum.COMPLEX)) {
+            allDocs = applyCRAG(question, allDocs);
+            
+            if (allDocs == null || allDocs.isEmpty()) {
+                return new RagAnswer("经过检索质量评估，未找到相关知识", List.of());
+            }
+        }
 
-        // 8. 重排序（可选）
+        // 6. 文档后处理流水线（包含个性化重排序）
+        allDocs = postProcessDocuments(allDocs, query, topK, lambda, memoryContext);
+
+        // 7. 再次检查空结果
+        if (allDocs.isEmpty()) {
+            return new RagAnswer("该知识点暂未收录", List.of());
+        }
+
+        // 8. 生成答案（注入记忆）
+        return generateAnswerWithContext(question, query, allDocs, memoryContext);
+    }
+
+    /**
+     * 多查询检索实现（带来源过滤）
+     */
+    protected List<Document> retrieveWithMultiQuery(String originalQuery, String source) {
+        List<String> queries = generateMultiQueries(originalQuery);
+        
+        ContentRetriever retriever = getContextRetriever();
+        if (retriever == null) {
+            return List.of();
+        }
+        
+        Set<String> allQueries = new LinkedHashSet<>();
+        allQueries.add(originalQuery);
+        allQueries.addAll(queries);
+        
+        List<Document> allDocs = new ArrayList<>();
+        for (String query : allQueries) {
+            try {
+                // 使用带来源过滤的检索
+                List<Document> docs = retriever.retrieve(query, source);
+                if (docs != null && !docs.isEmpty()) {
+                    allDocs.addAll(docs);
+                    log.debug("查询 '{}' 检索到 {} 个文档", 
+                        query.substring(0, Math.min(30, query.length())), docs.size());
+                }
+            } catch (Exception e) {
+                log.warn("查询 '{}' 检索失败: {}", query, e.getMessage());
+            }
+        }
+        
+        allDocs = deduplicateDocuments(allDocs);
+        log.info("多查询检索完成，共获得 {} 个不重复文档", allDocs.size());
+        
+        return allDocs;
+    }
+
+    /**
+     * 文档后处理流水线（支持个性化）
+     */
+    protected List<Document> postProcessDocuments(List<Document> docs, String query, int topK, double lambda) {
+        return postProcessDocuments(docs, query, topK, lambda, MemoryContext.EMPTY);
+    }
+
+    /**
+     * 文档后处理流水线（支持个性化）
+     */
+    protected List<Document> postProcessDocuments(List<Document> docs, String query, int topK, double lambda, 
+                                                  MemoryContext memoryContext) {
+        // 1. 文档过滤
+        docs = filterDocuments(docs, query);
+        
+        // 2. 重排序（考虑用户偏好）
         ReRanker reRanker = getReRanker();
         if (reRanker != null && !docs.isEmpty()) {
             docs = reRanker.rerank(docs, query, topK, String.valueOf(lambda));
         }
-
-        // 9. 再次检查空结果
-        if (docs.isEmpty()) {
-            return new RagAnswer("该知识点暂未收录", List.of());
+        
+        // 3. 个性化调整（如果启用）
+        if (shouldPersonalizeRetrieval() && !memoryContext.longTermMemories().isEmpty()) {
+            docs = applyUserPreferenceToDocs(docs, memoryContext.longTermMemories());
         }
+        
+        // 4. 上下文压缩
+        docs = compressContext(docs, query);
+        
+        return docs;
+    }
 
-        // 提取文档来源（只保留 source 信息）
+    /**
+     * 生成答案（支持记忆注入）
+     */
+    protected RagAnswer generateAnswerWithContext(String originalQuestion, String retrievalQuery, 
+                                                  List<Document> docs,
+                                                  MemoryContext memoryContext) {
         List<String> sources = extractSources(docs);
 
-        // 10. 上下文压缩（可选，避免超出 token 限制）
-        docs = compressContext(docs, query);
-
-        // 11. 构建系统提示词
-        String systemPrompt = buildSystemMessage(docs);
-
-        // 12. 构建用户提示词
-        String userPrompt = buildUserMessage(query, docs);
-
-        // 13. 调用大模型
-        String answer = chatModel.apply(systemPrompt, userPrompt);
+        String baseSystemPrompt = buildSystemMessage(docs);
         
-        // 14. 后处理（可选）
-        answer = postprocessAnswer(answer, query, docs);
+        String enhancedSystemPrompt = buildPromptWithMemories(
+            baseSystemPrompt, 
+            memoryContext.shortTermHistory(), 
+            memoryContext.longTermMemories()
+        );
         
-        // 15. 提取实际被引用的来源（从答案中解析 [1]、[2] 等标记）
+        String userPrompt = buildUserMessage(originalQuestion, docs);
+
+        String answer = chatClient.prompt()
+                .system(enhancedSystemPrompt)
+                .user(userPrompt)
+                .call()
+                .content();
+        
+        answer = postprocessAnswer(answer, originalQuestion, docs);
+        
         List<String> citedSources = extractCitedSources(answer, sources);
 
         return new RagAnswer(answer, citedSources);
+    }
+
+    // ==================== 工具方法 ====================
+
+    protected String preprocessQuery(String query) {
+        return query == null ? "" : query.trim();
+    }
+
+    protected List<Document> filterDocuments(List<Document> docs, String query) {
+        return docs.stream()
+                .filter(doc -> doc.getText() != null && doc.getText().length() > 20)
+                .collect(Collectors.toList());
+    }
+
+    protected List<Document> compressContext(List<Document> docs, String query) {
+        if (hybridCompressor != null && !docs.isEmpty()) {
+            try {
+                log.info("使用 HybridCompressor 进行上下文压缩");
+                List<Document> compressed = hybridCompressor.compress(docs, query);
+                log.info("压缩后文档数: {} -> {}", docs.size(), compressed.size());
+                return compressed;
+            } catch (Exception e) {
+                log.error("HybridCompressor 压缩失败，降级为简单截断", e);
+            }
+        }
+        
+        if (docs.size() > 5) {
+            log.debug("使用简单截断策略，保留前 5 个文档");
+            return docs.subList(0, 5);
+        }
+        return docs;
     }
 
     protected List<String> extractSources(List<Document> docs) {
@@ -165,94 +624,22 @@ public abstract class AbstractBasicRag implements RagFlow {
                     Object source = doc.getMetadata().get("source");
                     return source != null ? source.toString() : "未知来源";
                 })
-                .distinct()  // 去重
+                .distinct()
                 .collect(Collectors.toList());
     }
 
-
-    /**
-     * 增强 RAG 流程（用于复杂问题）
-     */
-    private String executeEnhancedRag(String question, BiFunction<String, String, String> chatModel, int topK, double lambda) {
-        RagAnswer result = executeEnhancedRagWithSources(question, chatModel, topK, lambda);
-        return result.getAnswer();
-    }
-
-    private RagAnswer executeEnhancedRagWithSources(String question, BiFunction<String, String, String> chatModel, int topK, double lambda) {
-        // 对于复杂问题，启用多查询生成
-        List<String> multiQuery = multiQuery(question);
-
-        // 合并所有查询的结果
-        StringBuilder queryBuilder = new StringBuilder(question);
-        for (String q : multiQuery) {
-            queryBuilder.append("\n").append(q);
-        }
-        // 使用更严格的参数执行标准 RAG
-        return executeStandardRagWithSources(queryBuilder.toString(), chatModel, topK, lambda);
-    }
-
-    /**
-     * Query 预处理：清洗、标准化
-     */
-    protected String preprocessQuery(String query) {
-        if (query == null) {
-            return "";
-        }
-        // 去除首尾空格
-        query = query.trim();
-        // 可以在这里添加更多预处理逻辑
-        return query;
-    }
-
-    /**
-     * 文档过滤：根据相关性分数或其他条件过滤低质量文档
-     */
-    protected List<Document> filterDocuments(List<Document> docs, String query) {
-        // 默认过滤策略：移除过短的文档
-        return docs.stream()
-                .filter(doc -> doc.getText() != null && doc.getText().length() > 20)
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * 上下文压缩：避免超出 LLM 的 token 限制，提高精确率
-     */
-    protected List<Document> compressContext(List<Document> docs, String query) {
-        // 默认策略：保留最相关的文档
-        if (docs.size() > 5) {
-            // 只保留前 5 个最相关的文档
-            return docs.subList(0, 5);
-        }
-        return docs;
-    }
-
-    /**
-     * 答案后处理：格式化、验证等
-     */
-    protected String postprocessAnswer(String answer, String query, List<Document> docs) {
-        // 默认不处理，子类可以重写
-        return answer;
-    }
-    
-    /**
-     * 从答案中提取实际引用的来源编号
-     * @param answer LLM 生成的答案
-     * @param allSources 所有可能的来源列表
-     * @return 实际被引用的来源列表
-     */
     protected List<String> extractCitedSources(String answer, List<String> allSources) {
         if (answer == null || allSources.isEmpty()) {
             return List.of();
         }
         
-        // 查找答案中的 [1]、[2] 等引用标记
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\[(\\d+)\\]");
         java.util.regex.Matcher matcher = pattern.matcher(answer);
         
-        java.util.Set<Integer> citedIndices = new java.util.HashSet<>();
+        Set<Integer> citedIndices = new HashSet<>();
         while (matcher.find()) {
             try {
-                int index = Integer.parseInt(matcher.group(1)) - 1;  // 转换为 0-based
+                int index = Integer.parseInt(matcher.group(1)) - 1;
                 if (index >= 0 && index < allSources.size()) {
                     citedIndices.add(index);
                 }
@@ -261,13 +648,11 @@ public abstract class AbstractBasicRag implements RagFlow {
             }
         }
         
-        // 如果没有找到引用标记，返回所有来源（兼容旧逻辑）
         if (citedIndices.isEmpty()) {
             log.warn("LLM 未标注引用来源，返回所有检索到的文档");
             return allSources;
         }
         
-        // 返回实际被引用的来源
         log.info("从答案中提取到 {} 个引用来源", citedIndices.size());
         return citedIndices.stream()
                 .sorted()
@@ -275,56 +660,11 @@ public abstract class AbstractBasicRag implements RagFlow {
                 .collect(Collectors.toList());
     }
 
-    @Override
-    public String overrideQuery(String query) {
-        return query;
+    protected String postprocessAnswer(String answer, String query, List<Document> docs) {
+        return answer;
     }
 
-    @Override
-    public List<String> multiQuery(String query) {
-        return List.of();
-    }
+    // ==================== 数据记录类 ====================
 
-    @Override
-    public ReRanker getReRanker() {
-        return null;
-    }
-
-    @Override
-    public String buildSystemMessage(List<Document> docs) {
-        // 为每个文档添加编号，方便 LLM 引用
-        StringBuilder contextBuilder = new StringBuilder();
-        for (int i = 0; i < docs.size(); i++) {
-            Document doc = docs.get(i);
-            String title = (String) doc.getMetadata().getOrDefault("title", "未知");
-            String category = (String) doc.getMetadata().getOrDefault("category", "未知");
-            String text = doc.getText();
-            
-            contextBuilder.append(String.format("[%d] 【%s】(分类:%s)\n%s\n\n", 
-                    i + 1, title, category, text));
-        }
-        
-        String context = contextBuilder.toString();
-        
-        return String.format("""
-                你是一个大模型应用开发知识库助手。根据以下资料回答问题。
-                如果资料无法回答，请说“该知识点暂未收录”。
-                
-                **重要要求：**
-                1. 请在回答中使用 [1]、[2] 等标记来引用资料来源
-                2. 每个观点都应该标注来源
-                3. 只使用提供的资料，不要编造信息
-                4. 如果资料中的信息不足以完整回答问题，请明确说明
-                5. 保持答案简洁、准确，直接回答问题
-                
-                资料：
-                %s
-                """, context);
-    }
-
-    @Override
-    public String buildUserMessage(String query, List<Document> docs) {
-        return String.format("用户问题：%s\n" +
-                "                答案：", query);
-    }
+    protected record RetrievalConfig(int topK, double lambda) {}
 }
