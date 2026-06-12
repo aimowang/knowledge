@@ -278,6 +278,19 @@ public class LongTermMemoryManager {
         return getUserMemoriesFromDb(userId);
     }
     
+    /**
+     * 获取相关的长期记忆（基于问题内容）
+     * 这是编排器调用的方法，内部调用 searchMemories
+     */
+    public List<LongTermMemory> getRelevantMemories(String userId, String question) {
+        if (userId == null || question == null || question.isEmpty()) {
+            return List.of();
+        }
+        
+        // 使用向量检索获取最相关的 top 5 条记忆
+        return searchMemories(userId, question, 5);
+    }
+    
     private List<LongTermMemory> getUserMemoriesFromDb(String userId) {
         return repository.findByUserId(userId).stream()
                 .map(this::convertToModel)

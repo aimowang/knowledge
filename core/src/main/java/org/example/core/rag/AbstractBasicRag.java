@@ -25,6 +25,12 @@ import java.util.stream.Collectors;
 /**
  * RAG 流程抽象基类 - 模板方法模式
  * 
+ * @deprecated 已废弃，请使用新的 {@link org.example.core.rag.AbstractRagFlow} 架构
+ * 
+ * 迁移指南：
+ * - 基本功能：继承 AbstractRagFlow 并配置管道和编排器
+ * - 参考文档：MIGRATION_GUIDE.md
+ * 
  * 设计原则：
  * 1. 统一的 RAG 流程实现，通过参数区分标准/增强模式
  * 2. 提供可定制的钩子方法（protected 方法）
@@ -32,6 +38,7 @@ import java.util.stream.Collectors;
  * 4. 消除代码重复，提高可维护性
  */
 @Slf4j
+@Deprecated
 public abstract class AbstractBasicRag implements RagFlow {
 
     // ==================== 依赖注入 ====================

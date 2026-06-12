@@ -121,6 +121,26 @@ public class ShortTermMemoryManager {
     }
     
     /**
+     * 获取短期记忆历史（别名方法，与 getConversationHistory 相同）
+     */
+    public List<ChatMessage> getHistory(String userId) {
+        return getConversationHistory(userId);
+    }
+    
+    /**
+     * 保存消息（通用方法）
+     */
+    public void saveMessage(String userId, String role, String message) {
+        if ("user".equals(role)) {
+            addUserMessage(userId, message);
+        } else if ("assistant".equals(role)) {
+            addAssistantMessage(userId, message);
+        } else {
+            log.warn("未知的角色: {}", role);
+        }
+    }
+    
+    /**
      * 清空用户会话
      */
     public void clearSession(String userId) {

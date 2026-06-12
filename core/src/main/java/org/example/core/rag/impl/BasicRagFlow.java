@@ -1,94 +1,91 @@
 package org.example.core.rag.impl;
 
 import lombok.extern.slf4j.Slf4j;
-import org.example.core.compress.HybridCompressor;
-import org.example.core.rag.AbstractBasicRag;
-import org.example.core.rag.QueryComplexityClassifier;
-import org.example.core.retrieval.BasicContentRetriever;
+import org.example.core.rag.AbstractRagFlow;
+import org.example.core.rag.orchestrator.DefaultRagOrchestrator;
+import org.example.core.rag.orchestrator.RagOrchestrator;
+import org.example.core.rag.pipeline.RagPipeline;
+import org.example.core.rag.pipeline.DefaultRagPipeline;
+import org.example.core.rag.pipeline.stage.GenerationStage;
+import org.example.core.rag.pipeline.stage.PostProcessingStage;
+import org.example.core.rag.pipeline.stage.QueryPreprocessingStage;
+import org.example.core.rag.pipeline.stage.RetrievalStage;
+import org.example.core.rag.strategy.impl.CompressionStrategy;
+import org.example.core.rag.strategy.impl.DeduplicationStrategy;
+import org.example.core.rag.strategy.impl.FilteringStrategy;
 import org.example.core.retrieval.ContentRetriever;
-import org.example.model.RetrievalConfig;
+import org.example.core.resilience.ResilienceHelper;
 import org.example.model.enums.CategoryEnum;
-import org.example.model.enums.ComplexityLevelEnum;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
- * 基础 RAG 流程实现
+ * 基础 RAG 流程实现 - 基于新架构
  * 
  * 特点：
  * - 不使用多查询生成
  * - 不使用 CRAG 流程
  * - 使用基础的检索和压缩策略
+ * - 禁用记忆和评估功能（保持简单）
  */
 @Slf4j
 @Component
-public class BasicRagFlow extends AbstractBasicRag {
+public class BasicRagFlow extends AbstractRagFlow {
 
-    private final BasicContentRetriever contentRetriever;
+    private final ContentRetriever contentRetriever;
+    private final DeduplicationStrategy dedupStrategy;
+    private final FilteringStrategy filterStrategy;
+    private final CompressionStrategy compressionStrategy;
+    private final ChatClient chatClient;
+    private final ResilienceHelper resilienceHelper;
 
-    public BasicRagFlow(BasicContentRetriever contentRetriever, 
-                       HybridCompressor hybridCompressor, 
-                       QueryComplexityClassifier queryComplexityClassifier,
-                       ChatClient chatClient) {
-        super(queryComplexityClassifier, chatClient, hybridCompressor);
+    public BasicRagFlow(DefaultRagPipeline pipeline,
+                       DefaultRagOrchestrator orchestrator,
+                       ContentRetriever contentRetriever,
+                       DeduplicationStrategy dedupStrategy,
+                       FilteringStrategy filterStrategy,
+                       CompressionStrategy compressionStrategy,
+                       ChatClient chatClient,
+                       ResilienceHelper resilienceHelper) {
+        super(pipeline, orchestrator);
         this.contentRetriever = contentRetriever;
-        log.info("BasicRagFlow 初始化完成");
+        this.dedupStrategy = dedupStrategy;
+        this.filterStrategy = filterStrategy;
+        this.compressionStrategy = compressionStrategy;
+        this.chatClient = chatClient;
+        this.resilienceHelper = resilienceHelper;
+        log.info("BasicRagFlow 初始化完成 - 基于新架构");
+    }
+
+    @Override
+    protected void configurePipeline(RagPipeline pipeline) {
+        // 配置简单管道：不包含多查询、CRAG 等高级功能
+        pipeline.addStage(new QueryPreprocessingStage())
+                .addStage(new RetrievalStage(contentRetriever))
+                .addStage(new PostProcessingStage(
+                    dedupStrategy, 
+                    filterStrategy, 
+                    compressionStrategy, 
+                    null)) // 不使用重排序
+                .addStage(new GenerationStage(chatClient, resilienceHelper));
+        
+        log.debug("BasicRagFlow 管道配置完成");
+    }
+
+    @Override
+    protected void configureOrchestrator(RagOrchestrator orchestrator) {
+        // BasicRagFlow 禁用所有高级功能
+        orchestrator.disableShortTermMemory();
+        orchestrator.disableLongTermMemory();
+        orchestrator.disableEvaluation();
+        
+        log.debug("BasicRagFlow 编排器配置完成 - 已禁用记忆和评估");
     }
 
     @Override
     public List<String> support() {
         return List.of(CategoryEnum.BASIC.getValue());
-    }
-
-    @Override
-    public ContentRetriever getContextRetriever() {
-        return contentRetriever;
-    }
-
-    // ==================== 个性化定制（钩子方法重写）====================
-
-    /**
-     * BasicRagFlow 不启用多查询（保持简单）
-     */
-    @Override
-    protected boolean shouldUseMultiQuery(String question, ComplexityLevelEnum complexity) {
-        log.debug("BasicRagFlow: 禁用多查询功能");
-        return false;
-    }
-
-    /**
-     * BasicRagFlow 不启用 CRAG（保持简单）
-     */
-    @Override
-    protected boolean shouldUseCRAG(ComplexityLevelEnum complexity) {
-        log.debug("BasicRagFlow: 禁用 CRAG 功能");
-        return false;
-    }
-
-    /**
-     * 自定义检索配置（更保守的参数）
-     */
-    @Override
-    protected RetrievalConfig getRetrievalConfig(ComplexityLevelEnum complexity) {
-        return switch (complexity) {
-            case SIMPLE -> new RetrievalConfig(0, 0.0);
-            case MODERATE -> new RetrievalConfig(3, 0.6);  // 比默认更少的文档
-            case COMPLEX -> new RetrievalConfig(5, 0.7);   // 比默认更少的文档
-        };
-    }
-
-    /**
-     * 自定义文档过滤策略（更严格）
-     */
-    @Override
-    protected List<Document> filterDocuments(List<Document> docs, String query) {
-        log.debug("BasicRagFlow: 应用严格的文档过滤");
-        return docs.stream()
-                .filter(doc -> doc.getText() != null && doc.getText().length() > 50)  // 更长的最小长度
-                .collect(Collectors.toList());
     }
 }
