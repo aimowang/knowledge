@@ -1,14 +1,12 @@
 package org.example.core.rag;
 
 import org.example.core.document.State;
-import org.example.core.rerank.ReRanker;
-import org.example.core.retrieval.ContentRetriever;
 import org.example.model.RagAnswer;
 
-import java.util.List;
-
+/**
+ * RAG 流程接口
+ */
 public interface RagFlow extends State {
-
     
     /**
      * 执行 RAG 流程（支持文档来源过滤）
@@ -18,11 +16,4 @@ public interface RagFlow extends State {
      * @return 带来源的答案
      */
     RagAnswer executeRag(String question, String userId, String source);
-    
-    // ==================== 辅助方法（供内部使用）====================
-    
-    String overrideQuery(String query);
-    List<String> multiQuery(String query);
-    ContentRetriever getContextRetriever();
-    ReRanker getReRanker();
 }

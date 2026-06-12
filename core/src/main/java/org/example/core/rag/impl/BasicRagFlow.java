@@ -4,10 +4,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.core.rag.AbstractRagFlow;
 import org.example.core.rag.orchestrator.DefaultRagOrchestrator;
 import org.example.core.rag.orchestrator.RagOrchestrator;
+import org.example.core.rag.orchestrator.RagOrchestratorConfig;
 import org.example.core.rag.pipeline.RagPipeline;
 import org.example.core.rag.pipeline.DefaultRagPipeline;
+import org.example.core.rag.pipeline.stage.CompressionStage;
+import org.example.core.rag.pipeline.stage.DeduplicationStage;
+import org.example.core.rag.pipeline.stage.FilteringStage;
 import org.example.core.rag.pipeline.stage.GenerationStage;
-import org.example.core.rag.pipeline.stage.PostProcessingStage;
 import org.example.core.rag.pipeline.stage.QueryPreprocessingStage;
 import org.example.core.rag.pipeline.stage.RetrievalStage;
 import org.example.core.rag.strategy.impl.CompressionStrategy;
@@ -61,25 +64,22 @@ public class BasicRagFlow extends AbstractRagFlow {
 
     @Override
     protected void configurePipeline(RagPipeline pipeline) {
-        // 配置简单管道：不包含多查询、CRAG 等高级功能
+        // 配置简单管道：使用独立的后处理 Stage
         pipeline.addStage(new QueryPreprocessingStage())
                 .addStage(new RetrievalStage(contentRetriever))
-                .addStage(new PostProcessingStage(
-                    dedupStrategy, 
-                    filterStrategy, 
-                    compressionStrategy, 
-                    null)) // 不使用重排序
+                .addStage(new DeduplicationStage(dedupStrategy))
+                .addStage(new FilteringStage(filterStrategy))
+                .addStage(new CompressionStage(compressionStrategy))
                 .addStage(new GenerationStage(chatClient, resilienceHelper));
         
-        log.debug("BasicRagFlow 管道配置完成");
+        log.debug("BasicRagFlow 管道配置完成 - 使用独立 Stage");
     }
 
     @Override
     protected void configureOrchestrator(RagOrchestrator orchestrator) {
-        // BasicRagFlow 禁用所有高级功能
-        orchestrator.disableShortTermMemory();
-        orchestrator.disableLongTermMemory();
-        orchestrator.disableEvaluation();
+        // BasicRagFlow 禁用所有高级功能（使用默认配置）
+        RagOrchestratorConfig config = RagOrchestratorConfig.defaultConfig();
+        orchestrator.updateConfig(config);
         
         log.debug("BasicRagFlow 编排器配置完成 - 已禁用记忆和评估");
     }

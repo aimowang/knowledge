@@ -31,10 +31,8 @@ public class DefaultRagOrchestrator implements RagOrchestrator {
     private final QueryComplexityClassifier complexityClassifier;
     private final EvaluationManager evaluationManager;
     
-    // 功能开关
-    private boolean shortTermMemoryEnabled = false;
-    private boolean longTermMemoryEnabled = false;
-    private boolean evaluationEnabled = false;
+    // 配置对象
+    private RagOrchestratorConfig config;
     
     public DefaultRagOrchestrator(CacheService cacheService,
                                  ShortTermMemoryManager shortTermMemoryManager,
@@ -46,6 +44,7 @@ public class DefaultRagOrchestrator implements RagOrchestrator {
         this.longTermMemoryManager = longTermMemoryManager;
         this.complexityClassifier = complexityClassifier;
         this.evaluationManager = evaluationManager;
+        this.config = RagOrchestratorConfig.defaultConfig();
     }
     
     @Override
@@ -94,12 +93,12 @@ public class DefaultRagOrchestrator implements RagOrchestrator {
         log.debug("开始执行后编排 - 用户: {}", userId);
         
         // 1. 保存短期记忆
-        if (shortTermMemoryEnabled && shortTermMemoryManager != null) {
+        if (config.isShortTermMemoryEnabled() && shortTermMemoryManager != null) {
             saveToShortTermMemory(userId, question, answer.getAnswer());
         }
         
         // 2. 提取长期记忆
-        if (longTermMemoryEnabled && shortTermMemoryManager != null) {
+        if (config.isLongTermMemoryEnabled() && shortTermMemoryManager != null) {
             List<ChatMessage> history = getShortTermHistory(userId);
             if (!history.isEmpty()) {
                 extractLongTermMemories(userId, history);
@@ -107,7 +106,7 @@ public class DefaultRagOrchestrator implements RagOrchestrator {
         }
         
         // 3. 触发异步评估
-        if (evaluationEnabled && evaluationManager != null) {
+        if (config.isEvaluationEnabled() && evaluationManager != null) {
             triggerEvaluation(userId, question, answer.getAnswer());
         }
         
@@ -124,54 +123,14 @@ public class DefaultRagOrchestrator implements RagOrchestrator {
     }
     
     @Override
-    public void enableShortTermMemory() {
-        this.shortTermMemoryEnabled = true;
-        log.info("启用短期记忆");
+    public RagOrchestratorConfig getConfig() {
+        return config;
     }
     
     @Override
-    public void disableShortTermMemory() {
-        this.shortTermMemoryEnabled = false;
-        log.info("禁用短期记忆");
-    }
-    
-    @Override
-    public void enableLongTermMemory() {
-        this.longTermMemoryEnabled = true;
-        log.info("启用长期记忆");
-    }
-    
-    @Override
-    public void disableLongTermMemory() {
-        this.longTermMemoryEnabled = false;
-        log.info("禁用长期记忆");
-    }
-    
-    @Override
-    public void enableEvaluation() {
-        this.evaluationEnabled = true;
-        log.info("启用质量评估");
-    }
-    
-    @Override
-    public void disableEvaluation() {
-        this.evaluationEnabled = false;
-        log.info("禁用质量评估");
-    }
-    
-    @Override
-    public boolean isShortTermMemoryEnabled() {
-        return shortTermMemoryEnabled;
-    }
-    
-    @Override
-    public boolean isLongTermMemoryEnabled() {
-        return longTermMemoryEnabled;
-    }
-    
-    @Override
-    public boolean isEvaluationEnabled() {
-        return evaluationEnabled;
+    public void updateConfig(RagOrchestratorConfig newConfig) {
+        this.config = newConfig;
+        log.info("更新 RAG 编排器配置: {}", newConfig);
     }
     
     // ==================== 私有方法 ====================
@@ -184,10 +143,10 @@ public class DefaultRagOrchestrator implements RagOrchestrator {
             return MemoryContext.EMPTY;
         }
         
-        List<ChatMessage> shortTermHistory = shortTermMemoryEnabled && shortTermMemoryManager != null ?
+        List<ChatMessage> shortTermHistory = config.isShortTermMemoryEnabled() && shortTermMemoryManager != null ?
             shortTermMemoryManager.getHistory(userId) : List.of();
         
-        List<LongTermMemory> longTermMemories = longTermMemoryEnabled && longTermMemoryManager != null ?
+        List<LongTermMemory> longTermMemories = config.isLongTermMemoryEnabled() && longTermMemoryManager != null ?
             longTermMemoryManager.getRelevantMemories(userId, question) : List.of();
         
         return new MemoryContext(shortTermHistory, longTermMemories);

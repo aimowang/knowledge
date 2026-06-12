@@ -23,47 +23,12 @@ public interface RagOrchestrator {
     void afterExecute(RagContext context, RagAnswer answer);
     
     /**
-     * 启用短期记忆
+     * 获取当前配置
      */
-    void enableShortTermMemory();
+    RagOrchestratorConfig getConfig();
     
     /**
-     * 禁用短期记忆
+     * 更新配置
      */
-    void disableShortTermMemory();
-    
-    /**
-     * 启用长期记忆
-     */
-    void enableLongTermMemory();
-    
-    /**
-     * 禁用长期记忆
-     */
-    void disableLongTermMemory();
-    
-    /**
-     * 启用质量评估
-     */
-    void enableEvaluation();
-    
-    /**
-     * 禁用质量评估
-     */
-    void disableEvaluation();
-    
-    /**
-     * 是否启用短期记忆
-     */
-    boolean isShortTermMemoryEnabled();
-    
-    /**
-     * 是否启用长期记忆
-     */
-    boolean isLongTermMemoryEnabled();
-    
-    /**
-     * 是否启用质量评估
-     */
-    boolean isEvaluationEnabled();
+    void updateConfig(RagOrchestratorConfig config);
 }

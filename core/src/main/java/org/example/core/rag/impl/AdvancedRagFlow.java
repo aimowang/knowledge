@@ -4,11 +4,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.core.rag.AbstractRagFlow;
 import org.example.core.rag.orchestrator.DefaultRagOrchestrator;
 import org.example.core.rag.orchestrator.RagOrchestrator;
+import org.example.core.rag.orchestrator.RagOrchestratorConfig;
 import org.example.core.rag.pipeline.RagPipeline;
 import org.example.core.rag.pipeline.DefaultRagPipeline;
+import org.example.core.rag.pipeline.stage.CompressionStage;
+import org.example.core.rag.pipeline.stage.DeduplicationStage;
+import org.example.core.rag.pipeline.stage.FilteringStage;
 import org.example.core.rag.pipeline.stage.GenerationStage;
-import org.example.core.rag.pipeline.stage.PostProcessingStage;
 import org.example.core.rag.pipeline.stage.QueryPreprocessingStage;
+import org.example.core.rag.pipeline.stage.ReRankingStage;
 import org.example.core.rag.pipeline.stage.RetrievalStage;
 import org.example.core.rag.strategy.impl.CompressionStrategy;
 import org.example.core.rag.strategy.impl.DeduplicationStrategy;
@@ -79,25 +83,23 @@ public class AdvancedRagFlow extends AbstractRagFlow {
 
     @Override
     protected void configurePipeline(RagPipeline pipeline) {
-        // 配置增强管道：包含所有高级功能
+        // 配置增强管道：使用独立的后处理 Stage，包含重排序
         pipeline.addStage(new QueryPreprocessingStage())
                 .addStage(new RetrievalStage(contentRetriever))
-                .addStage(new PostProcessingStage(
-                    dedupStrategy, 
-                    filterStrategy, 
-                    compressionStrategy, 
-                    reRanker)) // 使用重排序
+                .addStage(new DeduplicationStage(dedupStrategy))
+                .addStage(new FilteringStage(filterStrategy))
+                .addStage(new ReRankingStage(reRanker))  // 启用重排序
+                .addStage(new CompressionStage(compressionStrategy))
                 .addStage(new GenerationStage(chatClient, resilienceHelper));
         
-        log.debug("AdvancedRagFlow 管道配置完成 - 包含重排序");
+        log.debug("AdvancedRagFlow 管道配置完成 - 使用独立 Stage + 重排序");
     }
 
     @Override
     protected void configureOrchestrator(RagOrchestrator orchestrator) {
         // AdvancedRagFlow 启用所有高级功能
-        orchestrator.enableShortTermMemory();
-        orchestrator.enableLongTermMemory();
-        orchestrator.enableEvaluation();
+        RagOrchestratorConfig config = RagOrchestratorConfig.allEnabled();
+        orchestrator.updateConfig(config);
         
         log.debug("AdvancedRagFlow 编排器配置完成 - 已启用记忆和评估");
     }

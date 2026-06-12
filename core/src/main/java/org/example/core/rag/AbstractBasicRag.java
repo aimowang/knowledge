@@ -230,17 +230,14 @@ public abstract class AbstractBasicRag implements RagFlow {
 
     // ==================== RagFlow 接口实现 ====================
 
-    @Override
     public String overrideQuery(String query) {
         return query;
     }
 
-    @Override
     public List<String> multiQuery(String query) {
         return generateMultiQueries(query);
     }
 
-    @Override
     public ReRanker getReRanker() {
         return null;
     }
@@ -760,6 +757,8 @@ public abstract class AbstractBasicRag implements RagFlow {
         
         return allDocs;
     }
+
+    protected abstract ContentRetriever getContextRetriever();
 
     /**
      * 文档后处理流水线（支持个性化）

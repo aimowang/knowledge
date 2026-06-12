@@ -4,11 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.core.rag.context.RagContext;
 import org.example.core.rag.orchestrator.RagOrchestrator;
 import org.example.core.rag.pipeline.RagPipeline;
-import org.example.core.rerank.ReRanker;
-import org.example.core.retrieval.ContentRetriever;
 import org.example.model.RagAnswer;
-
-import java.util.List;
 
 /**
  * RAG 流程抽象基类 - 简化版
@@ -97,31 +93,5 @@ public abstract class AbstractRagFlow implements RagFlow {
      */
     protected RagAnswer buildCachedAnswer(RagContext context) {
         return new RagAnswer(context.getAnswer(), context.getSources());
-    }
-    
-    // ==================== RagFlow 接口的默认实现 ====================
-    
-    @Override
-    public String overrideQuery(String query) {
-        // 默认不重写查询，子类可以override
-        return query;
-    }
-    
-    @Override
-    public List<String> multiQuery(String query) {
-        // 默认不支持多查询，子类可以override
-        return List.of();
-    }
-    
-    @Override
-    public ContentRetriever getContextRetriever() {
-        // 默认返回 null，子类可以override
-        return null;
-    }
-    
-    @Override
-    public ReRanker getReRanker() {
-        // 默认返回 null，子类可以override
-        return null;
     }
 }
