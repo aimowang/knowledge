@@ -1,0 +1,26 @@
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/knowledge-rag/application.json
+    json.keys_under_root: true
+    json.add_error_key: true
+    json.message_key: message
+    fields:
+      log_type: application
+      service: knowledge-rag
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "knowledge-rag-%{+yyyy.MM.dd}"
+
+setup.template.name: "knowledge-rag"
+setup.template.pattern: "knowledge-rag-*"
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644

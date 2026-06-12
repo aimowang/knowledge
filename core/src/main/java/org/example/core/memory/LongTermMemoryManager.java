@@ -1,24 +1,19 @@
 package org.example.core.memory;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.example.core.repository.LongTermMemoryRepository;
 import org.example.model.LongTermMemory;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * 长期记忆管理器（基于文件存储 + 向量检索）
- * 支持持久化、向量检索、记忆合并和遗忘
+ * 长期记忆管理器（基于 MySQL + 向量检索）
  */
 @Slf4j
 @Component
@@ -26,11 +21,7 @@ public class LongTermMemoryManager {
     
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final EmbeddingModel embeddingModel;
-    
-    /**
-     * 用户ID -> 记忆列表
-     */
-    private final Map<String, List<LongTermMemory>> userMemories = new ConcurrentHashMap<>();
+    private final LongTermMemoryRepository repository;
     
     /**
      * 用户ID -> 记忆向量缓存 (memoryId -> embedding)
@@ -38,34 +29,19 @@ public class LongTermMemoryManager {
     private final Map<String, Map<String, float[]>> memoryEmbeddings = new ConcurrentHashMap<>();
     
     /**
-     * 记忆存储路径
-     */
-    private static final String MEMORY_DIR = "data/long-term-memory";
-    
-    /**
      * 记忆合并阈值（余弦相似度）
      */
     private static final double MERGE_THRESHOLD = 0.85;
     
-    public LongTermMemoryManager(EmbeddingModel embeddingModel) {
+    public LongTermMemoryManager(EmbeddingModel embeddingModel, LongTermMemoryRepository repository) {
         this.embeddingModel = embeddingModel;
+        this.repository = repository;
     }
     
     @PostConstruct
     public void init() {
-        try {
-            Path dir = Paths.get(MEMORY_DIR);
-            if (!Files.exists(dir)) {
-                Files.createDirectories(dir);
-                log.info("创建长期记忆目录: {}", MEMORY_DIR);
-            }
-            loadAllMemories();
-            
-            // 启动定期清理任务
-            scheduleMemoryCleanup();
-        } catch (IOException e) {
-            log.error("初始化长期记忆失败", e);
-        }
+        log.info("长期记忆管理器初始化完成，使用 MySQL 持久化");
+        scheduleMemoryCleanup();
     }
 
     private void scheduleMemoryCleanup() {
@@ -80,35 +56,45 @@ public class LongTermMemoryManager {
             memory.setId(UUID.randomUUID().toString());
         }
         
-        List<LongTermMemory> memories = userMemories.computeIfAbsent(memory.getUserId(), k -> new ArrayList<>());
-        
         // 1. 检查是否可以合并到现有记忆
         LongTermMemory existingMemory = findSimilarMemory(memory.getUserId(), memory);
         if (existingMemory != null) {
             mergeMemories(existingMemory, memory);
-            saveUserMemories(memory.getUserId());
+            saveToDatabase(existingMemory);
             log.info("记忆合并: {} + {}", existingMemory.getContent(), memory.getContent());
             return;
         }
         
         // 2. 添加新记忆
-        memories.add(memory);
-        saveUserMemories(memory.getUserId());
+        saveToDatabase(memory);
         log.info("为用户 {} 添加长期记忆: {}", memory.getUserId(), memory.getContent());
+    }
+    
+    private void saveToDatabase(LongTermMemory memory) {
+        org.example.model.entity.LongTermMemoryEntity entity = new org.example.model.entity.LongTermMemoryEntity();
+        entity.setId(memory.getId());
+        entity.setUserId(memory.getUserId());
+        entity.setType(memory.getType().name());
+        entity.setContent(memory.getContent());
+        entity.setKeywords(memory.getKeywords());
+        entity.setImportance(memory.getImportance());
+        entity.setAccessCount(memory.getAccessCount());
+        entity.setCreatedAt(memory.getCreatedAt());
+        entity.setLastAccessedAt(memory.getLastAccessedAt());
+        repository.save(entity);
     }
     
     /**
      * 查找相似的记忆
      */
     private LongTermMemory findSimilarMemory(String userId, LongTermMemory newMemory) {
-        List<LongTermMemory> memories = userMemories.getOrDefault(userId, List.of());
+        List<LongTermMemory> memories = getUserMemoriesFromDb(userId);
         
         try {
             float[] newEmbedding = embedText(newMemory.getContent() + " " + 
                 (newMemory.getKeywords() != null ? newMemory.getKeywords() : ""));
             
             for (LongTermMemory existing : memories) {
-                // 只检查相同类型的记忆
                 if (existing.getType() != newMemory.getType()) {
                     continue;
                 }
@@ -117,8 +103,6 @@ public class LongTermMemoryManager {
                 if (existingEmbedding != null) {
                     double similarity = cosineSimilarity(newEmbedding, existingEmbedding);
                     if (similarity >= MERGE_THRESHOLD) {
-                        log.debug("找到相似记忆: 相似度={:.2f}, 现有={}, 新={}", 
-                            similarity, existing.getContent(), newMemory.getContent());
                         return existing;
                     }
                 }
@@ -167,17 +151,14 @@ public class LongTermMemoryManager {
      * 根据查询检索记忆（向量相似度检索）
      */
     public List<LongTermMemory> searchMemories(String userId, String query, int topK) {
-        List<LongTermMemory> memories = userMemories.getOrDefault(userId, List.of());
+        List<LongTermMemory> memories = getUserMemoriesFromDb(userId);
         
         if (memories.isEmpty() || query == null || query.isEmpty()) {
             return List.of();
         }
         
         try {
-            // 1. 将查询向量化
             float[] queryEmbedding = embedText(query);
-            
-            // 2. 计算每个记忆的相似度
             List<MemoryScore> scoredMemories = new ArrayList<>();
             for (LongTermMemory memory : memories) {
                 float[] memoryEmbedding = getOrCreateEmbedding(userId, memory);
@@ -187,7 +168,6 @@ public class LongTermMemoryManager {
                 }
             }
             
-            // 3. 按相似度排序，返回 Top-K
             return scoredMemories.stream()
                     .sorted((a, b) -> Double.compare(b.similarity, a.similarity))
                     .limit(topK)
@@ -197,16 +177,14 @@ public class LongTermMemoryManager {
                     
         } catch (Exception e) {
             log.error("向量检索失败，降级为关键词匹配", e);
-            // 降级：使用关键词匹配
-            return keywordSearch(userId, query, topK);
+            return keywordSearch(memories, query, topK);
         }
     }
     
     /**
      * 关键词匹配（降级方案）
      */
-    private List<LongTermMemory> keywordSearch(String userId, String query, int topK) {
-        List<LongTermMemory> memories = userMemories.getOrDefault(userId, List.of());
+    private List<LongTermMemory> keywordSearch(List<LongTermMemory> memories, String query, int topK) {
         String lowerQuery = query.toLowerCase();
         
         return memories.stream()
@@ -297,105 +275,53 @@ public class LongTermMemoryManager {
      * 获取用户的所有记忆
      */
     public List<LongTermMemory> getUserMemories(String userId) {
-        return List.copyOf(userMemories.getOrDefault(userId, List.of()));
+        return getUserMemoriesFromDb(userId);
+    }
+    
+    private List<LongTermMemory> getUserMemoriesFromDb(String userId) {
+        return repository.findByUserId(userId).stream()
+                .map(this::convertToModel)
+                .collect(Collectors.toList());
+    }
+    
+    private LongTermMemory convertToModel(org.example.model.entity.LongTermMemoryEntity entity) {
+        LongTermMemory memory = new LongTermMemory(entity.getUserId(), 
+                LongTermMemory.MemoryType.valueOf(entity.getType()), 
+                entity.getContent(), 
+                entity.getKeywords());
+        memory.setId(entity.getId());
+        memory.setImportance(entity.getImportance());
+        memory.setAccessCount(entity.getAccessCount());
+        memory.setCreatedAt(entity.getCreatedAt());
+        memory.setLastAccessedAt(entity.getLastAccessedAt());
+        return memory;
     }
     
     /**
      * 删除记忆
      */
     public boolean deleteMemory(String userId, String memoryId) {
-        List<LongTermMemory> memories = userMemories.get(userId);
-        if (memories == null) {
-            return false;
-        }
-        
-        boolean removed = memories.removeIf(m -> m.getId().equals(memoryId));
-        if (removed) {
-            saveUserMemories(userId);
+        if (repository.findById(memoryId).isPresent()) {
+            repository.deleteById(memoryId);
             log.info("删除用户 {} 的记忆: {}", userId, memoryId);
+            return true;
         }
-        return removed;
+        return false;
     }
     
     /**
      * 清空用户的所有记忆
      */
     public void clearUserMemories(String userId) {
-        userMemories.remove(userId);
-        
-        // 删除文件
-        try {
-            Path file = Paths.get(MEMORY_DIR, userId + ".json");
-            if (Files.exists(file)) {
-                Files.delete(file);
-            }
-            log.info("清空用户 {} 的所有长期记忆", userId);
-        } catch (IOException e) {
-            log.error("删除记忆文件失败", e);
-        }
+        repository.deleteByUserId(userId);
+        memoryEmbeddings.remove(userId);
+        log.info("清空用户 {} 的所有长期记忆", userId);
     }
     
     /**
-     * 从文件加载所有记忆
+     * 从数据库加载所有记忆
      */
     private void loadAllMemories() {
-        try {
-            Path dir = Paths.get(MEMORY_DIR);
-            if (!Files.exists(dir)) {
-                return;
-            }
-            
-            Files.list(dir)
-                .filter(p -> p.toString().endsWith(".json"))
-                .forEach(this::loadUserMemories);
-            
-            log.info("加载长期记忆完成，共 {} 个用户", userMemories.size());
-        } catch (IOException e) {
-            log.error("加载长期记忆失败", e);
-        }
-    }
-    
-    /**
-     * 加载单个用户的记忆
-     */
-    private void loadUserMemories(Path filePath) {
-        try {
-            String fileName = filePath.getFileName().toString();
-            String userId = fileName.replace(".json", "");
-            
-            String json = Files.readString(filePath);
-            List<LongTermMemory> memories = objectMapper.readValue(
-                json, 
-                new TypeReference<List<LongTermMemory>>() {}
-            );
-            
-            userMemories.put(userId, memories);
-            log.debug("加载用户 {} 的 {} 条记忆", userId, memories.size());
-        } catch (IOException e) {
-            log.error("加载用户记忆失败: {}", filePath, e);
-        }
-    }
-    
-    /**
-     * 保存用户记忆到文件
-     */
-    private void saveUserMemories(String userId) {
-        try {
-            Path dir = Paths.get(MEMORY_DIR);
-            if (!Files.exists(dir)) {
-                Files.createDirectories(dir);
-            }
-            
-            Path file = dir.resolve(userId + ".json");
-            List<LongTermMemory> memories = userMemories.get(userId);
-            
-            if (memories != null && !memories.isEmpty()) {
-                String json = objectMapper.writerWithDefaultPrettyPrinter()
-                        .writeValueAsString(memories);
-                Files.writeString(file, json);
-            }
-        } catch (IOException e) {
-            log.error("保存用户记忆失败: {}", userId, e);
-        }
+        log.info("从 MySQL 加载长期记忆完成，共 {} 条", repository.count());
     }
 }

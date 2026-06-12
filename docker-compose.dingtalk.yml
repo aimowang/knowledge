@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  dingtalk-webhook:
+    image: timonweb/dingtalk-alertmanager-webhook:latest
+    container_name: knowledge-dingtalk-webhook
+    ports:
+      - "8060:8060"
+    environment:
+      - DINGTALK_WEBHOOK_URL=${DINGTALK_WEBHOOK_URL}
+      - DINGTALK_SECRET=${DINGTALK_SECRET}
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    external: true

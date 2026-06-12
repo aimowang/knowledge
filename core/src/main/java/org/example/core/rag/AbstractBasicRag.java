@@ -1,8 +1,10 @@
 package org.example.core.rag;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.core.cache.CacheService;
 import org.example.core.compress.HybridCompressor;
 import org.example.core.rag.handler.ComplexRAGHandler;
+import org.example.core.resilience.ResilienceHelper;
 import org.example.core.rerank.ReRanker;
 import org.example.core.retrieval.ContentRetriever;
 import org.example.model.ChatMessage;
@@ -12,6 +14,9 @@ import org.example.model.RetrievalConfig;
 import org.example.model.enums.ComplexityLevelEnum;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -36,18 +41,21 @@ public abstract class AbstractBasicRag implements RagFlow {
     protected HybridCompressor hybridCompressor;
     protected ComplexRAGHandler complexRAGHandler;
     
-    // ==================== 优化：线程池 ====================
+    // P0 修复：注入缓存服务和容错辅助类
+    @Autowired(required = false)
+    protected CacheService cacheService;
     
-    // 并行检索线程池
-    private final ExecutorService retrievalExecutor = Executors.newFixedThreadPool(
-            Math.min(Runtime.getRuntime().availableProcessors(), 8),
-            r -> {
-                Thread thread = new Thread(r);
-                thread.setName("rag-retrieval-" + thread.getId());
-                thread.setDaemon(true);
-                return thread;
-            }
-    );
+    @Autowired(required = false)
+    protected ResilienceHelper resilienceHelper;
+    
+    // P1 优化：注入专用线程池
+    @Autowired
+    @Qualifier("ragRetrievalExecutor")
+    protected ThreadPoolTaskExecutor ragRetrievalExecutor;
+    
+    @Autowired
+    @Qualifier("llmCallExecutor")
+    protected ThreadPoolTaskExecutor llmCallExecutor;
 
     public AbstractBasicRag(QueryComplexityClassifier complexityClassifier, ChatClient chatClient) {
         this.complexityClassifier = complexityClassifier;
@@ -75,20 +83,29 @@ public abstract class AbstractBasicRag implements RagFlow {
         log.debug("开始执行 RAG 流程 - 用户: {}, 来源: {}, 问题: {}", userId, source,
             question.substring(0, Math.min(50, question.length())));
         
-        // 1. 获取记忆上下文（如果启用）
+        //1. 检查缓存（如果启用）
+        if (userId != null && cacheService != null) {
+            RagAnswer cachedAnswer = cacheService.getQaAnswer(userId, question, RagAnswer.class);
+            if (cachedAnswer != null) {
+                log.info("✅ 缓存命中 - 用户: {}, 问题: {}", userId, question.substring(0, Math.min(50, question.length())));
+                return cachedAnswer;
+            }
+        }
+        
+        // 2. 获取记忆上下文（如果启用）
         MemoryContext memoryContext = loadMemoryContext(userId, question);
         
-        // 2. 复杂度分类（自适应路由）
+        // 3. 复杂度分类（自适应路由）
         ComplexityLevelEnum complexity = classifyComplexity(question);
         
-        // 3. 根据复杂度选择处理策略（注入记忆和来源过滤）
+        // 4. 根据复杂度选择处理策略（注入记忆和来源过滤）
         RagAnswer result = switch (complexity) {
             case SIMPLE -> handleSimpleQuestion(question, memoryContext);
             case MODERATE -> handleModerateQuestion(question, memoryContext, source);
             case COMPLEX -> handleComplexQuestion(question, memoryContext, source);
         };
         
-        // 4. 保存对话到记忆（如果启用）
+        // 5. 保存对话到记忆（如果启用）
         if (userId != null && shouldUseShortTermMemory()) {
             saveToShortTermMemory(userId, question, result.getAnswer());
             
@@ -99,9 +116,15 @@ public abstract class AbstractBasicRag implements RagFlow {
             }
         }
         
-        // 5. 触发质量评估（如果启用）
+        // 6. 触发质量评估（如果启用）
         if (userId != null && shouldEnableEvaluation()) {
             triggerEvaluation(userId, question, result.getAnswer(), null);
+        }
+        
+        // 7. 保存答案到缓存（如果启用）
+        if (userId != null && cacheService != null && result.getAnswer() != null) {
+            cacheService.cacheQaAnswer(userId, question, result);
+            log.debug("✅ 已缓存答案 - 用户: {}", userId);
         }
         
         log.debug("RAG 流程完成 - 来源数: {}", result.getSources().size());
@@ -174,6 +197,30 @@ public abstract class AbstractBasicRag implements RagFlow {
         static final MemoryContext EMPTY = new MemoryContext(List.of(), List.of());
     }
 
+    // ==================== LLM 调用容错封装 ====================
+    
+    /**
+     * 带容错的 LLM 调用（熔断、重试、超时）
+     * @param prompt 提示词
+     * @return LLM 响应内容
+     */
+    protected String callLlmWithResilience(String prompt) {
+        if (resilienceHelper != null) {
+            // 使用 Resilience4j 容错
+            return resilienceHelper.executeWithLlmResilience(
+                () -> chatClient.prompt(prompt).call().content(),
+                () -> {
+                    log.warn("⚠️ LLM 调用失败，返回降级响应");
+                    return "抱歉，服务暂时不可用，请稍后重试。";
+                }
+            );
+        } else {
+            // 降级：直接调用（无容错）
+            log.warn("⚠️ ResilienceHelper 未配置，直接调用 LLM");
+            return chatClient.prompt(prompt).call().content();
+        }
+    }
+
     // ==================== RagFlow 接口实现 ====================
 
     @Override
@@ -242,11 +289,8 @@ public abstract class AbstractBasicRag implements RagFlow {
             
             String userPrompt = "原始问题：" + originalQuery;
             
-            String response = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .call()
-                    .content();
+            // P0 修复：使用带容错的 LLM 调用
+            String response = callLlmWithResilience(systemPrompt + "\n\n" + userPrompt);
             
             if (response == null || response.trim().isEmpty()) {
                 return List.of();
@@ -426,11 +470,8 @@ public abstract class AbstractBasicRag implements RagFlow {
                 优化后的问题：
                 """, historyBuilder.toString(), query);
             
-            String enhancedQuery = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .call()
-                    .content();
+            // P0 修复：使用带容错的 LLM 调用
+            String enhancedQuery = callLlmWithResilience(systemPrompt + "\n\n" + userPrompt);
             
             if (enhancedQuery != null && !enhancedQuery.trim().isEmpty()) {
                 String result = enhancedQuery.trim();
@@ -498,11 +539,8 @@ public abstract class AbstractBasicRag implements RagFlow {
                 只输出一行结果，不要解释。
                 """;
             
-            String expandedQuery = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(query)
-                    .call()
-                    .content();
+            // P0 修复：使用带容错的 LLM 调用
+            String expandedQuery = callLlmWithResilience(systemPrompt + "\n\n" + query);
             
             if (expandedQuery != null && !expandedQuery.trim().isEmpty()) {
                 // 取第一行，防止 LLM 输出多余内容
@@ -553,11 +591,8 @@ public abstract class AbstractBasicRag implements RagFlow {
         );
         
         String userPrompt = "问题：" + question;
-        String answer = chatClient.prompt()
-                .system(enhancedSystemPrompt)
-                .user(userPrompt)
-                .call()
-                .content();
+        // P0 修复：使用带容错的 LLM 调用
+        String answer = callLlmWithResilience(enhancedSystemPrompt + "\n\n" + userPrompt);
         return new RagAnswer(answer, List.of());
     }
 
@@ -682,10 +717,11 @@ public abstract class AbstractBasicRag implements RagFlow {
             List<Document> finalAllDocs = allDocs;
             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 try {
+                    // P1 优化：使用注入的 ragRetrievalExecutor 线程池
                     // 优化：检索超时控制（3秒）
                     CompletableFuture<List<Document>> retrievalFuture = CompletableFuture.supplyAsync(() -> {
                         return retriever.retrieve(query, source);
-                    }, retrievalExecutor);
+                    }, ragRetrievalExecutor.getThreadPoolExecutor());
                     
                     List<Document> docs = retrievalFuture.get(3, TimeUnit.SECONDS);
                     
@@ -699,7 +735,7 @@ public abstract class AbstractBasicRag implements RagFlow {
                 } catch (Exception e) {
                     log.warn("查询 '{}' 检索失败: {}", query, e.getMessage());
                 }
-            }, retrievalExecutor);
+            }, ragRetrievalExecutor.getThreadPoolExecutor());
             
             futures.add(future);
         }
@@ -768,11 +804,8 @@ public abstract class AbstractBasicRag implements RagFlow {
         
         String userPrompt = buildUserMessage(originalQuestion, docs);
 
-        String answer = chatClient.prompt()
-                .system(enhancedSystemPrompt)
-                .user(userPrompt)
-                .call()
-                .content();
+        // 使用带容错的 LLM 调用
+        String answer = callLlmWithResilience(enhancedSystemPrompt + "\n\n" + userPrompt);
         
         // 后处理：清理和验证
         answer = postprocessAnswer(answer, originalQuestion, docs);

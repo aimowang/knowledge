@@ -1,24 +1,31 @@
 package org.example.core.memory;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.example.model.ChatMessage;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
- * 短期记忆管理器（基于内存）
- * 支持多用户隔离
+ * 短期记忆管理器（Redis + 内存二级缓存）
+ * 支持多用户隔离和分布式部署
  */
 @Slf4j
 @Component
 public class ShortTermMemoryManager {
     
+    private final RedisTemplate<String, String> redisTemplate;
+    private final ObjectMapper objectMapper;
+    
     /**
-     * 用户ID -> 对话历史
+     * 用户ID -> 对话历史（内存缓存，加速读取）
      */
     private final Map<String, UserSession> userSessions = new ConcurrentHashMap<>();
     
@@ -32,14 +39,43 @@ public class ShortTermMemoryManager {
      */
     private static final int SESSION_EXPIRE_MINUTES = 30;
     
+    public ShortTermMemoryManager(RedisTemplate<String, String> redisTemplate) {
+        this.redisTemplate = redisTemplate;
+        this.objectMapper = new ObjectMapper();
+    }
+    
     /**
      * 获取或创建用户会话
      */
     public UserSession getOrCreateSession(String userId) {
-        return userSessions.computeIfAbsent(userId, id -> {
-            log.info("创建新用户会话: {}", id);
-            return new UserSession(id, DEFAULT_MAX_MESSAGES);
-        });
+        // 1. 先从内存缓存获取
+        UserSession session = userSessions.get(userId);
+        if (session != null && !session.isExpired(SESSION_EXPIRE_MINUTES)) {
+            session.refreshLastAccessTime();
+            return session;
+        }
+        
+        // 2. 从 Redis 加载
+        try {
+            String redisKey = "session:" + userId;
+            String json = redisTemplate.opsForValue().get(redisKey);
+            if (json != null) {
+                List<ChatMessage> messages = objectMapper.readValue(json, 
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, ChatMessage.class));
+                session = new UserSession(userId, DEFAULT_MAX_MESSAGES, messages);
+                userSessions.put(userId, session);
+                log.info("从 Redis 恢复用户会话: {}", userId);
+                return session;
+            }
+        } catch (JsonProcessingException e) {
+            log.error("从 Redis 加载会话失败: {}", userId, e);
+        }
+        
+        // 3. 创建新会话
+        session = new UserSession(userId, DEFAULT_MAX_MESSAGES);
+        userSessions.put(userId, session);
+        log.info("创建新用户会话: {}", userId);
+        return session;
     }
     
     /**
@@ -48,6 +84,7 @@ public class ShortTermMemoryManager {
     public void addUserMessage(String userId, String message) {
         UserSession session = getOrCreateSession(userId);
         session.addMessage(new ChatMessage("user", message));
+        saveSessionToRedis(userId, session);
         log.debug("用户 {} 添加消息，当前消息数: {}", userId, session.getMessages().size());
     }
     
@@ -57,6 +94,7 @@ public class ShortTermMemoryManager {
     public void addAssistantMessage(String userId, String message) {
         UserSession session = getOrCreateSession(userId);
         session.addMessage(new ChatMessage("assistant", message));
+        saveSessionToRedis(userId, session);
         log.debug("助手为 {} 添加回复", userId);
     }
     
@@ -87,7 +125,21 @@ public class ShortTermMemoryManager {
      */
     public void clearSession(String userId) {
         userSessions.remove(userId);
+        redisTemplate.delete("session:" + userId);
         log.info("已清空用户 {} 的会话", userId);
+    }
+    
+    /**
+     * 保存会话到 Redis
+     */
+    private void saveSessionToRedis(String userId, UserSession session) {
+        try {
+            String redisKey = "session:" + userId;
+            String json = objectMapper.writeValueAsString(session.getMessages());
+            redisTemplate.opsForValue().set(redisKey, json, SESSION_EXPIRE_MINUTES, TimeUnit.MINUTES);
+        } catch (JsonProcessingException e) {
+            log.error("保存会话到 Redis 失败: {}", userId, e);
+        }
     }
     
     /**
@@ -111,6 +163,16 @@ public class ShortTermMemoryManager {
             this.userId = userId;
             this.maxMessages = maxMessages;
             this.messages = new java.util.ArrayList<>();
+            this.lastAccessTime = LocalDateTime.now();
+        }
+        
+        /**
+         * 从 Redis 加载的构造函数
+         */
+        public UserSession(String userId, int maxMessages, List<ChatMessage> loadedMessages) {
+            this.userId = userId;
+            this.maxMessages = maxMessages;
+            this.messages = new java.util.ArrayList<>(loadedMessages);
             this.lastAccessTime = LocalDateTime.now();
         }
         

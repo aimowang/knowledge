@@ -1,0 +1,23 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'dingtalk'
+
+receivers:
+  - name: 'dingtalk'
+    webhook_configs:
+      - url: 'http://dingtalk-webhook:8060/dingtalk/webhook1/send'
+        send_resolved: true
+
+# 抑制规则（避免告警风暴）
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']

@@ -1,0 +1,78 @@
+groups:
+  - name: knowledge-rag-alerts
+    rules:
+      # 1. 应用健康检查告警
+      - alert: ApplicationDown
+        expr: up{application="knowledge-rag"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RAG 应用已下线"
+          description: "应用 {{ $labels.instance }} 已经下线超过 1 分钟"
+
+      # 2. HTTP 5xx 错误率过高
+      - alert: HighErrorRate
+        expr: rate(http_server_requests_seconds_count{status=~"5..", application="knowledge-rag"}[5m]) 
+              / 
+              rate(http_server_requests_seconds_count{application="knowledge-rag"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP 5xx 错误率过高"
+          description: "过去 5 分钟内，{{ $labels.instance }} 的 5xx 错误率为 {{ $value | humanizePercentage }}"
+
+      # 3. P95 延迟过高
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{application="knowledge-rag"}[5m])) > 5
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 延迟过高"
+          description: "{{ $labels.instance }} 的 P95 延迟为 {{ $value }}s（阈值：5s）"
+
+      # 4. JVM 内存使用率过高
+      - alert: HighMemoryUsage
+        expr: jvm_memory_used_bytes{area="heap", application="knowledge-rag"} 
+              / 
+              jvm_memory_max_bytes{area="heap", application="knowledge-rag"} > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM 堆内存使用率过高"
+          description: "{{ $labels.instance }} 的堆内存使用率为 {{ $value | humanizePercentage }}"
+
+      # 5. Redis 连接失败
+      - alert: RedisConnectionDown
+        expr: redis_connections{application="knowledge-rag"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis 连接失败"
+          description: "{{ $labels.instance }} 无法连接到 Redis"
+
+      # 6. 数据库连接池耗尽
+      - alert: DatabasePoolExhausted
+        expr: hikaricp_connections_active{application="knowledge-rag"} 
+              / 
+              hikaricp_connections_max{application="knowledge-rag"} > 0.9
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据库连接池接近耗尽"
+          description: "{{ $labels.instance }} 的连接池使用率为 {{ $value | humanizePercentage }}"
+
+      # 7. RAG 问答响应时间过长
+      - alert: RagAnswerSlow
+        expr: histogram_quantile(0.95, rate(http_server_requests_seconds_bucket{uri="/api/qa/ask", application="knowledge-rag"}[5m])) > 10
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAG 问答响应时间过长"
+          description: "{{ $labels.instance }} 的 P95 响应时间为 {{ $value }}s（阈值：10s）"

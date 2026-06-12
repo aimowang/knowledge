@@ -1,5 +1,8 @@
 package org.example.api.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.example.core.evaluation.EvaluationManager;
 import org.example.core.service.KnowledgeQAService;
@@ -17,6 +20,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/qa")
+@Tag(name = "RAG 问答", description = "知识库问答相关接口，支持长期记忆和质量评估")
 public class KnowledgeQAController {
 
     private final KnowledgeQAService qaService;
@@ -29,30 +33,11 @@ public class KnowledgeQAController {
 
     /**
      * 带记忆的问答（推荐）
-     * 用户请求 (POST /api/qa/ask)
-     * ↓
-     * Controller (异常处理 + 日志)
-     * ↓
-     * KnowledgeQAService
-     * ├─ classifyQuestion() [LLM 分类]
-     * └─ selectRagFlow() [选择 RAG 实现]
-     * ↓
-     * AbstractBasicRag.executeRag()
-     * ├─ loadMemoryContext() [加载记忆]
-     * ├─ classifyComplexity() [复杂度分类]
-     * ├─ handleSimple/Moderate/Complex() [执行策略]
-     * │   └─ executeRagFlow()
-     * │       ├─ enhanceQueryWithMemory() [Query 增强]
-     * │       ├─ retriever.retrieve(query, source) [向量检索 + 过滤]
-     * │       ├─ postProcessDocuments() [重排序 + 压缩]
-     * │       └─ generateAnswerWithContext() [生成答案]
-     * ├─ saveToShortTermMemory() [保存短期记忆]
-     * └─ triggerEvaluation() [质量评估]
-     * ↓
-     * 返回 RagAnswer
      */
     @PostMapping("/ask")
-    public RagAnswer askWithMemory(@RequestBody AskRequest request) {
+    @Operation(summary = "RAG 问答", description = "基于知识库的智能问答，支持长期记忆和自适应检索策略")
+    public RagAnswer askWithMemory(
+            @Parameter(description = "问答请求", required = true) @RequestBody AskRequest request) {
         try {
             log.info("收到问答请求 - 用户: {}, 问题: {}, 来源: {}",
                     request.getUserId(),
@@ -84,7 +69,10 @@ public class KnowledgeQAController {
      * 清空用户会话
      */
     @DeleteMapping("/session/{userId}")
-    public String clearSession(@PathVariable String userId) {
+    @Operation(summary = "清空会话", description = "清除指定用户的短期记忆和评估历史")
+    public String clearSession(
+            @Parameter(description = "用户ID", required = true, example = "user123") 
+            @PathVariable String userId) {
         evaluationManager.clearUserEvaluations(userId);
         return "会话已清空";
     }
@@ -93,7 +81,9 @@ public class KnowledgeQAController {
      * 获取用户的评估历史
      */
     @GetMapping("/evaluations/{userId}")
-    public List<RagEvaluation> getUserEvaluations(@PathVariable String userId) {
+    @Operation(summary = "获取评估历史", description = "查询指定用户的所有 RAG 评估记录")
+    public List<RagEvaluation> getUserEvaluations(
+            @Parameter(description = "用户ID", required = true) @PathVariable String userId) {
         return evaluationManager.getUserEvaluations(userId);
     }
 
@@ -101,7 +91,9 @@ public class KnowledgeQAController {
      * 获取用户的平均评分
      */
     @GetMapping("/evaluations/{userId}/average")
-    public double getAverageScore(@PathVariable String userId) {
+    @Operation(summary = "获取平均评分", description = "计算指定用户的平均评估分数")
+    public double getAverageScore(
+            @Parameter(description = "用户ID", required = true) @PathVariable String userId) {
         return evaluationManager.getAverageScore(userId);
     }
 
@@ -109,6 +101,7 @@ public class KnowledgeQAController {
      * 获取全局统计信息
      */
     @GetMapping("/evaluations/statistics")
+    @Operation(summary = "全局统计", description = "获取所有用户的评估统计信息（总用户数、总评估数、平均分）")
     public Map<String, Object> getStatistics() {
         return evaluationManager.getStatistics();
     }
@@ -117,7 +110,9 @@ public class KnowledgeQAController {
      * 获取低质量评估（用于改进）
      */
     @GetMapping("/evaluations/low-quality")
+    @Operation(summary = "低质量评估", description = "获取低于阈值的评估记录，用于优化 RAG 流程")
     public List<RagEvaluation> getLowQualityEvaluations(
+            @Parameter(description = "评分阈值，默认 0.6", example = "0.6") 
             @RequestParam(defaultValue = "0.6") double threshold) {
         return evaluationManager.getLowQualityEvaluations(threshold);
     }
