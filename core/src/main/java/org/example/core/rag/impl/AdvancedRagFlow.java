@@ -2,27 +2,27 @@ package org.example.core.rag.impl;
 
 import lombok.extern.slf4j.Slf4j;
 import org.example.core.rag.AbstractRagFlow;
+import org.example.core.rag.handler.ComplexRAGHandler;
 import org.example.core.rag.orchestrator.DefaultRagOrchestrator;
 import org.example.core.rag.orchestrator.RagOrchestrator;
 import org.example.core.rag.orchestrator.RagOrchestratorConfig;
 import org.example.core.rag.pipeline.RagPipeline;
 import org.example.core.rag.pipeline.DefaultRagPipeline;
 import org.example.core.rag.pipeline.stage.CompressionStage;
+import org.example.core.rag.pipeline.stage.CragStage;
 import org.example.core.rag.pipeline.stage.DeduplicationStage;
 import org.example.core.rag.pipeline.stage.FilteringStage;
 import org.example.core.rag.pipeline.stage.GenerationStage;
 import org.example.core.rag.pipeline.stage.MultiQueryGenerationStage;
+import org.example.core.rag.pipeline.stage.ParallelRetrievalStage;
 import org.example.core.rag.pipeline.stage.QueryCleaningStage;
 import org.example.core.rag.pipeline.stage.QueryEnhancementStage;
-import org.example.core.rag.strategy.QueryEnhancementStrategy;
-import org.example.core.rag.strategy.RetrievalStrategy;
-import org.example.core.rag.strategy.impl.KeywordExpansionEnhancer;
-import org.example.core.rag.strategy.impl.MemoryBasedQueryEnhancer;
-import org.example.core.rag.strategy.impl.MultiQueryGenerator;
 import org.example.core.rag.pipeline.stage.ReRankingStage;
 import org.example.core.rag.pipeline.stage.RetrievalStage;
-import org.example.core.rag.strategy.impl.DefaultRetrievalStrategy;
+import org.example.core.rag.strategy.QueryEnhancementStrategy;
+import org.example.core.rag.strategy.RetrievalStrategy;
 import org.example.core.rag.strategy.impl.CompressionStrategy;
+import org.example.core.rag.strategy.impl.DefaultRetrievalStrategy;
 import org.example.core.rag.strategy.impl.DeduplicationStrategy;
 import org.example.core.rag.strategy.impl.FilteringStrategy;
 import org.example.core.rag.strategy.impl.KeywordExpansionEnhancer;
@@ -44,8 +44,9 @@ import java.util.List;
  * - ✅ 启用短期记忆（对话历史）
  * - ✅ 启用长期记忆（用户偏好、事实）
  * - ✅ 启用质量评估（异步）
- * - ✅ 支持多查询生成
+ * - ✅ 支持多查询生成 + 并行检索
  * - ✅ 支持关键词扩展
+ * - ✅ 支持 CRAG（Corrective RAG）
  * - ✅ 支持重排序
  */
 @Slf4j
@@ -59,6 +60,7 @@ public class AdvancedRagFlow extends AbstractRagFlow {
     private final MemoryBasedQueryEnhancer memoryEnhancer;
     private final KeywordExpansionEnhancer keywordEnhancer;
     private final MultiQueryGenerator multiQueryGenerator;
+    private final ComplexRAGHandler cragHandler;
     private final ReRanker reRanker;
     private final ChatClient chatClient;
     private final ResilienceHelper resilienceHelper;
@@ -72,6 +74,7 @@ public class AdvancedRagFlow extends AbstractRagFlow {
                           MemoryBasedQueryEnhancer memoryEnhancer,
                           KeywordExpansionEnhancer keywordEnhancer,
                           MultiQueryGenerator multiQueryGenerator,
+                          ComplexRAGHandler cragHandler,
                           ReRanker reRanker,
                           ChatClient chatClient,
                           ResilienceHelper resilienceHelper) {
@@ -83,6 +86,7 @@ public class AdvancedRagFlow extends AbstractRagFlow {
         this.memoryEnhancer = memoryEnhancer;
         this.keywordEnhancer = keywordEnhancer;
         this.multiQueryGenerator = multiQueryGenerator;
+        this.cragHandler = cragHandler;
         this.reRanker = reRanker;
         this.chatClient = chatClient;
         this.resilienceHelper = resilienceHelper;
@@ -103,14 +107,16 @@ public class AdvancedRagFlow extends AbstractRagFlow {
         pipeline.addStage(new QueryCleaningStage())                    // 1. 清理
                 .addStage(new QueryEnhancementStage(strategies))       // 2. 增强（记忆+关键词）
                 .addStage(new MultiQueryGenerationStage(multiQueryGenerator))  // 3. 多查询生成
-                .addStage(new RetrievalStage(retrievalStrategy))       // 4. 检索
+                .addStage(new ParallelRetrievalStage(retrievalStrategy))       // 4. 并行检索（如果有多个查询）
+                .addStage(new RetrievalStage(retrievalStrategy))       // 5. 单次检索（如果没有多查询）
+                .addStage(new CragStage(cragHandler))                  // 6. CRAG 评估与修正
                 .addStage(new DeduplicationStage(dedupStrategy))
                 .addStage(new FilteringStage(filterStrategy))
-                .addStage(new ReRankingStage(reRanker))  // 5. 重排序
-                .addStage(new CompressionStage(compressionStrategy))   // 6. 压缩
-                .addStage(new GenerationStage(chatClient, resilienceHelper));  // 7. 生成
+                .addStage(new ReRankingStage(reRanker))                // 7. 重排序
+                .addStage(new CompressionStage(compressionStrategy))   // 8. 压缩
+                .addStage(new GenerationStage(chatClient, resilienceHelper));  // 9. 生成
         
-        log.debug("AdvancedRagFlow 管道配置完成 - 使用独立 Stage + 全量查询增强 + 重排序");
+        log.debug("AdvancedRagFlow 管道配置完成 - 使用独立 Stage + 全量查询增强 + 并行检索 + CRAG + 重排序");
     }
 
     @Override
