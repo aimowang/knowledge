@@ -1,5 +1,6 @@
 package org.example.core.rag;
 
+import org.example.core.metrics.RagMetrics;
 import org.example.core.rag.context.RagContext;
 import org.example.core.rag.orchestrator.DefaultRagOrchestrator;
 import org.example.core.rag.orchestrator.RagOrchestrator;
@@ -26,6 +27,9 @@ class AbstractRagFlowE2ETest {
     @Mock
     private DefaultRagOrchestrator orchestrator;
     
+    @Mock
+    private RagMetrics ragMetrics;
+    
     private TestRagFlow ragFlow;
     
     @BeforeEach
@@ -38,7 +42,7 @@ class AbstractRagFlowE2ETest {
             return new RagAnswer("测试答案", java.util.List.of("source1"));
         });
         
-        ragFlow = new TestRagFlow(pipeline, orchestrator);
+        ragFlow = new TestRagFlow(pipeline, orchestrator, ragMetrics);
     }
     
     @Test
@@ -92,8 +96,8 @@ class AbstractRagFlowE2ETest {
      */
     private static class TestRagFlow extends AbstractRagFlow {
         
-        public TestRagFlow(DefaultRagPipeline pipeline, DefaultRagOrchestrator orchestrator) {
-            super(pipeline, orchestrator);
+        public TestRagFlow(DefaultRagPipeline pipeline, DefaultRagOrchestrator orchestrator, RagMetrics ragMetrics) {
+            super(pipeline, orchestrator, ragMetrics);
         }
         
         protected void configurePipeline(DefaultRagPipeline pipeline) {

@@ -1,6 +1,7 @@
 package org.example.core.rag.impl;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.core.metrics.RagMetrics;
 import org.example.core.rag.AbstractRagFlow;
 import org.example.core.rag.handler.ComplexRAGHandler;
 import org.example.core.rag.orchestrator.DefaultRagOrchestrator;
@@ -64,6 +65,7 @@ public class AdvancedRagFlow extends AbstractRagFlow {
     private final ReRanker reRanker;
     private final ChatClient chatClient;
     private final ResilienceHelper resilienceHelper;
+    private final RagMetrics ragMetrics;
 
     public AdvancedRagFlow(DefaultRagPipeline pipeline,
                           DefaultRagOrchestrator orchestrator,
@@ -77,8 +79,9 @@ public class AdvancedRagFlow extends AbstractRagFlow {
                           ComplexRAGHandler cragHandler,
                           ReRanker reRanker,
                           ChatClient chatClient,
-                          ResilienceHelper resilienceHelper) {
-        super(pipeline, orchestrator);
+                          ResilienceHelper resilienceHelper,
+                          RagMetrics ragMetrics) {
+        super(pipeline, orchestrator, ragMetrics);
         this.contentRetriever = contentRetriever;
         this.dedupStrategy = dedupStrategy;
         this.filterStrategy = filterStrategy;
@@ -90,6 +93,7 @@ public class AdvancedRagFlow extends AbstractRagFlow {
         this.reRanker = reRanker;
         this.chatClient = chatClient;
         this.resilienceHelper = resilienceHelper;
+        this.ragMetrics = ragMetrics;
         log.info("AdvancedRagFlow 初始化完成 - 基于新架构，已启用所有高级功能");
     }
 
@@ -107,14 +111,14 @@ public class AdvancedRagFlow extends AbstractRagFlow {
         pipeline.addStage(new QueryCleaningStage())                    // 1. 清理
                 .addStage(new QueryEnhancementStage(strategies))       // 2. 增强（记忆+关键词）
                 .addStage(new MultiQueryGenerationStage(multiQueryGenerator))  // 3. 多查询生成
-                .addStage(new ParallelRetrievalStage(retrievalStrategy))       // 4. 并行检索（如果有多个查询）
-                .addStage(new RetrievalStage(retrievalStrategy))       // 5. 单次检索（如果没有多查询）
+                .addStage(new ParallelRetrievalStage(retrievalStrategy, ragMetrics))  // 4. 并行检索（如果有多个查询）
+                .addStage(new RetrievalStage(retrievalStrategy, ragMetrics))  // 5. 单次检索（如果没有多查询）
                 .addStage(new CragStage(cragHandler))                  // 6. CRAG 评估与修正
                 .addStage(new DeduplicationStage(dedupStrategy))
                 .addStage(new FilteringStage(filterStrategy))
                 .addStage(new ReRankingStage(reRanker))                // 7. 重排序
                 .addStage(new CompressionStage(compressionStrategy))   // 8. 压缩
-                .addStage(new GenerationStage(chatClient, resilienceHelper));  // 9. 生成
+                .addStage(new GenerationStage(chatClient, resilienceHelper, ragMetrics));  // 9. 生成
         
         log.debug("AdvancedRagFlow 管道配置完成 - 使用独立 Stage + 全量查询增强 + 并行检索 + CRAG + 重排序");
     }

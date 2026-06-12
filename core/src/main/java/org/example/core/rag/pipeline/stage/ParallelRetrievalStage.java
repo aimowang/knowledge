@@ -1,6 +1,7 @@
 package org.example.core.rag.pipeline.stage;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.core.metrics.RagMetrics;
 import org.example.core.rag.context.RagContext;
 import org.example.core.rag.pipeline.PipelineStage;
 import org.example.core.rag.strategy.RetrievalStrategy;
@@ -24,17 +25,20 @@ import java.util.stream.Collectors;
 public class ParallelRetrievalStage implements PipelineStage {
     
     private final RetrievalStrategy retrievalStrategy;
+    private final RagMetrics ragMetrics;
     private final int queryTimeoutSeconds;
     private final int totalTimeoutSeconds;
     
-    public ParallelRetrievalStage(RetrievalStrategy retrievalStrategy) {
-        this(retrievalStrategy, 3, 10);
+    public ParallelRetrievalStage(RetrievalStrategy retrievalStrategy, RagMetrics ragMetrics) {
+        this(retrievalStrategy, ragMetrics, 3, 10);
     }
     
     public ParallelRetrievalStage(RetrievalStrategy retrievalStrategy, 
+                                  RagMetrics ragMetrics,
                                   int queryTimeoutSeconds, 
                                   int totalTimeoutSeconds) {
         this.retrievalStrategy = retrievalStrategy;
+        this.ragMetrics = ragMetrics;
         this.queryTimeoutSeconds = queryTimeoutSeconds;
         this.totalTimeoutSeconds = totalTimeoutSeconds;
     }
@@ -57,6 +61,8 @@ public class ParallelRetrievalStage implements PipelineStage {
         
         log.info("开始并行检索 - {} 个查询", allQueries.size());
         
+        long startTime = System.currentTimeMillis();
+        
         try {
             // 并行执行所有查询
             List<Document> allDocs = Collections.synchronizedList(new ArrayList<>());
@@ -71,17 +77,25 @@ public class ParallelRetrievalStage implements PipelineStage {
                         RagContext tempContext = createTempContext(context, query);
                         
                         // 执行检索（带超时控制）
+                        long queryStartTime = System.currentTimeMillis();
                         CompletableFuture<List<Document>> retrievalFuture = 
                             CompletableFuture.supplyAsync(() -> 
                                 retrievalStrategy.retrieve(query, tempContext)
                             );
                         
                         List<Document> docs = retrievalFuture.get(queryTimeoutSeconds, TimeUnit.SECONDS);
+                        long queryDurationMs = System.currentTimeMillis() - queryStartTime;
+                        
+                        // 记录向量搜索指标
+                        if (ragMetrics != null) {
+                            ragMetrics.recordVectorSearch();
+                            ragMetrics.recordVectorSearchDuration(queryDurationMs / 1000.0);
+                        }
                         
                         if (docs != null && !docs.isEmpty()) {
                             allDocs.addAll(docs);
-                            log.debug("查询 '{}' 检索到 {} 个文档", 
-                                truncate(query), docs.size());
+                            log.debug("查询 '{}' 检索到 {} 个文档 (耗时: {}ms)", 
+                                truncate(query), docs.size(), queryDurationMs);
                         }
                         
                     } catch (Exception e) {
@@ -100,11 +114,14 @@ public class ParallelRetrievalStage implements PipelineStage {
                 log.warn("部分查询未完成（超时 {} 秒），使用已获取的结果", totalTimeoutSeconds);
             }
             
+            long totalDurationMs = System.currentTimeMillis() - startTime;
+            
             // 去重合并结果
             List<Document> deduplicatedDocs = deduplicateDocuments(allDocs);
             
             context.setDocuments(deduplicatedDocs);
-            log.info("并行检索完成 - 获得 {} 个不重复文档", deduplicatedDocs.size());
+            log.info("并行检索完成 - 获得 {} 个不重复文档 (总耗时: {}ms)", 
+                deduplicatedDocs.size(), totalDurationMs);
             
         } catch (Exception e) {
             log.error("并行检索失败: {}", e.getMessage(), e);

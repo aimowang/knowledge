@@ -1,6 +1,7 @@
 package org.example.core.rag.pipeline.stage;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.core.metrics.RagMetrics;
 import org.example.core.rag.context.RagContext;
 import org.example.core.rag.pipeline.PipelineStage;
 import org.example.core.rag.strategy.RetrievalStrategy;
@@ -18,9 +19,11 @@ import java.util.List;
 public class RetrievalStage implements PipelineStage {
     
     private final RetrievalStrategy retrievalStrategy;
+    private final RagMetrics ragMetrics;
     
-    public RetrievalStage(RetrievalStrategy retrievalStrategy) {
+    public RetrievalStage(RetrievalStrategy retrievalStrategy, RagMetrics ragMetrics) {
         this.retrievalStrategy = retrievalStrategy;
+        this.ragMetrics = ragMetrics;
     }
     
     @Override
@@ -30,8 +33,16 @@ public class RetrievalStage implements PipelineStage {
         log.debug("执行检索 - 查询: {}, 策略: {}", truncate(query), retrievalStrategy.getName());
         
         try {
-            // 使用策略执行检索
+            // 使用策略执行检索（带指标采集）
+            long startTime = System.currentTimeMillis();
             List<Document> docs = retrievalStrategy.retrieve(query, context);
+            long durationMs = System.currentTimeMillis() - startTime;
+            
+            // 记录向量搜索指标
+            if (ragMetrics != null) {
+                ragMetrics.recordVectorSearch();
+                ragMetrics.recordVectorSearchDuration(durationMs / 1000.0);
+            }
             
             if (docs == null) {
                 docs = new ArrayList<>();
@@ -39,7 +50,8 @@ public class RetrievalStage implements PipelineStage {
             
             context.setDocuments(docs);
             
-            log.info("检索完成 - 获得 {} 个文档 (策略: {})", docs.size(), retrievalStrategy.getName());
+            log.info("检索完成 - 获得 {} 个文档 (策略: {}, 耗时: {}ms)", 
+                docs.size(), retrievalStrategy.getName(), durationMs);
             
         } catch (Exception e) {
             log.error("检索失败 (策略: {}): {}", retrievalStrategy.getName(), e.getMessage(), e);

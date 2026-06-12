@@ -1,12 +1,12 @@
 package org.example.core.rag.pipeline.stage;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.core.metrics.RagMetrics;
 import org.example.core.rag.context.RagContext;
 import org.example.core.rag.pipeline.PipelineStage;
 import org.example.core.resilience.ResilienceHelper;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.regex.Matcher;
@@ -18,15 +18,16 @@ import java.util.stream.Collectors;
  * 负责基于检索到的文档生成最终答案
  */
 @Slf4j
-@Component
 public class GenerationStage implements PipelineStage {
     
     private final ChatClient chatClient;
     private final ResilienceHelper resilienceHelper;
+    private final RagMetrics ragMetrics;
     
-    public GenerationStage(ChatClient chatClient, ResilienceHelper resilienceHelper) {
+    public GenerationStage(ChatClient chatClient, ResilienceHelper resilienceHelper, RagMetrics ragMetrics) {
         this.chatClient = chatClient;
         this.resilienceHelper = resilienceHelper;
+        this.ragMetrics = ragMetrics;
     }
     
     @Override
@@ -49,8 +50,16 @@ public class GenerationStage implements PipelineStage {
             // 2. 构建用户提示词
             String userPrompt = buildUserMessage(context.getOriginalQuestion(), docs);
             
-            // 3. 调用 LLM 生成答案（带容错）
+            // 3. 调用 LLM 生成答案（带容错和指标采集）
+            long startTime = System.currentTimeMillis();
             String answer = callLlmWithResilience(systemPrompt + "\n\n" + userPrompt);
+            long durationMs = System.currentTimeMillis() - startTime;
+            
+            // 记录 LLM 调用指标
+            if (ragMetrics != null) {
+                ragMetrics.recordLlmCall();
+                ragMetrics.recordLlmCallDuration(durationMs / 1000.0);
+            }
             
             // 4. 提取来源
             List<String> sources = extractSources(docs);

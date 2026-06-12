@@ -1,6 +1,7 @@
 package org.example.core.rag.impl;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.core.metrics.RagMetrics;
 import org.example.core.rag.AbstractRagFlow;
 import org.example.core.rag.orchestrator.DefaultRagOrchestrator;
 import org.example.core.rag.orchestrator.RagOrchestrator;
@@ -13,14 +14,14 @@ import org.example.core.rag.pipeline.stage.FilteringStage;
 import org.example.core.rag.pipeline.stage.GenerationStage;
 import org.example.core.rag.pipeline.stage.QueryCleaningStage;
 import org.example.core.rag.pipeline.stage.QueryEnhancementStage;
+import org.example.core.rag.pipeline.stage.RetrievalStage;
 import org.example.core.rag.strategy.QueryEnhancementStrategy;
 import org.example.core.rag.strategy.RetrievalStrategy;
-import org.example.core.rag.strategy.impl.MemoryBasedQueryEnhancer;
-import org.example.core.rag.pipeline.stage.RetrievalStage;
-import org.example.core.rag.strategy.impl.DefaultRetrievalStrategy;
 import org.example.core.rag.strategy.impl.CompressionStrategy;
+import org.example.core.rag.strategy.impl.DefaultRetrievalStrategy;
 import org.example.core.rag.strategy.impl.DeduplicationStrategy;
 import org.example.core.rag.strategy.impl.FilteringStrategy;
+import org.example.core.rag.strategy.impl.MemoryBasedQueryEnhancer;
 import org.example.core.retrieval.ContentRetriever;
 import org.example.core.resilience.ResilienceHelper;
 import org.example.model.enums.CategoryEnum;
@@ -49,6 +50,7 @@ public class BasicRagFlow extends AbstractRagFlow {
     private final MemoryBasedQueryEnhancer memoryEnhancer;
     private final ChatClient chatClient;
     private final ResilienceHelper resilienceHelper;
+    private final RagMetrics ragMetrics;
 
     public BasicRagFlow(DefaultRagPipeline pipeline,
                        DefaultRagOrchestrator orchestrator,
@@ -58,8 +60,9 @@ public class BasicRagFlow extends AbstractRagFlow {
                        CompressionStrategy compressionStrategy,
                        MemoryBasedQueryEnhancer memoryEnhancer,
                        ChatClient chatClient,
-                       ResilienceHelper resilienceHelper) {
-        super(pipeline, orchestrator);
+                       ResilienceHelper resilienceHelper,
+                       RagMetrics ragMetrics) {
+        super(pipeline, orchestrator, ragMetrics);
         this.contentRetriever = contentRetriever;
         this.dedupStrategy = dedupStrategy;
         this.filterStrategy = filterStrategy;
@@ -67,6 +70,7 @@ public class BasicRagFlow extends AbstractRagFlow {
         this.memoryEnhancer = memoryEnhancer;
         this.chatClient = chatClient;
         this.resilienceHelper = resilienceHelper;
+        this.ragMetrics = ragMetrics;
         log.info("BasicRagFlow 初始化完成 - 基于新架构");
     }
 
@@ -82,11 +86,11 @@ public class BasicRagFlow extends AbstractRagFlow {
         pipeline.addStage(new QueryCleaningStage())                    // 1. 清理
                 .addStage(new QueryEnhancementStage(strategies))       // 2. 增强（仅记忆）
                 // 3. 跳过多查询生成
-                .addStage(new RetrievalStage(retrievalStrategy))       // 4. 检索
+                .addStage(new RetrievalStage(retrievalStrategy, ragMetrics))  // 4. 检索
                 .addStage(new DeduplicationStage(dedupStrategy))
                 .addStage(new FilteringStage(filterStrategy))
                 .addStage(new CompressionStage(compressionStrategy))
-                .addStage(new GenerationStage(chatClient, resilienceHelper));
+                .addStage(new GenerationStage(chatClient, resilienceHelper, ragMetrics));
         
         log.debug("BasicRagFlow 管道配置完成 - 使用独立 Stage + 记忆增强");
     }
