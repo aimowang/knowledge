@@ -11,9 +11,17 @@ import org.example.core.rag.pipeline.stage.CompressionStage;
 import org.example.core.rag.pipeline.stage.DeduplicationStage;
 import org.example.core.rag.pipeline.stage.FilteringStage;
 import org.example.core.rag.pipeline.stage.GenerationStage;
-import org.example.core.rag.pipeline.stage.QueryPreprocessingStage;
+import org.example.core.rag.pipeline.stage.MultiQueryGenerationStage;
+import org.example.core.rag.pipeline.stage.QueryCleaningStage;
+import org.example.core.rag.pipeline.stage.QueryEnhancementStage;
+import org.example.core.rag.strategy.QueryEnhancementStrategy;
+import org.example.core.rag.strategy.RetrievalStrategy;
+import org.example.core.rag.strategy.impl.KeywordExpansionEnhancer;
+import org.example.core.rag.strategy.impl.MemoryBasedQueryEnhancer;
+import org.example.core.rag.strategy.impl.MultiQueryGenerator;
 import org.example.core.rag.pipeline.stage.ReRankingStage;
 import org.example.core.rag.pipeline.stage.RetrievalStage;
+import org.example.core.rag.strategy.impl.DefaultRetrievalStrategy;
 import org.example.core.rag.strategy.impl.CompressionStrategy;
 import org.example.core.rag.strategy.impl.DeduplicationStrategy;
 import org.example.core.rag.strategy.impl.FilteringStrategy;
@@ -83,16 +91,26 @@ public class AdvancedRagFlow extends AbstractRagFlow {
 
     @Override
     protected void configurePipeline(RagPipeline pipeline) {
-        // 配置增强管道：使用独立的后处理 Stage，包含重排序
-        pipeline.addStage(new QueryPreprocessingStage())
-                .addStage(new RetrievalStage(contentRetriever))
+        // 配置增强管道：使用独立的查询处理 Stage，包含所有增强策略
+        List<QueryEnhancementStrategy> strategies = List.of(
+            memoryEnhancer,      // 记忆增强（指代消解）
+            keywordEnhancer      // 关键词扩展
+        );
+        
+        // 创建默认检索策略
+        RetrievalStrategy retrievalStrategy = new DefaultRetrievalStrategy(contentRetriever);
+        
+        pipeline.addStage(new QueryCleaningStage())                    // 1. 清理
+                .addStage(new QueryEnhancementStage(strategies))       // 2. 增强（记忆+关键词）
+                .addStage(new MultiQueryGenerationStage(multiQueryGenerator))  // 3. 多查询生成
+                .addStage(new RetrievalStage(retrievalStrategy))       // 4. 检索
                 .addStage(new DeduplicationStage(dedupStrategy))
                 .addStage(new FilteringStage(filterStrategy))
-                .addStage(new ReRankingStage(reRanker))  // 启用重排序
-                .addStage(new CompressionStage(compressionStrategy))
-                .addStage(new GenerationStage(chatClient, resilienceHelper));
+                .addStage(new ReRankingStage(reRanker))  // 5. 重排序
+                .addStage(new CompressionStage(compressionStrategy))   // 6. 压缩
+                .addStage(new GenerationStage(chatClient, resilienceHelper));  // 7. 生成
         
-        log.debug("AdvancedRagFlow 管道配置完成 - 使用独立 Stage + 重排序");
+        log.debug("AdvancedRagFlow 管道配置完成 - 使用独立 Stage + 全量查询增强 + 重排序");
     }
 
     @Override

@@ -3,9 +3,8 @@ package org.example.core.rag.pipeline.stage;
 import lombok.extern.slf4j.Slf4j;
 import org.example.core.rag.context.RagContext;
 import org.example.core.rag.pipeline.PipelineStage;
-import org.example.core.retrieval.ContentRetriever;
+import org.example.core.rag.strategy.RetrievalStrategy;
 import org.springframework.ai.document.Document;
-import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,39 +12,38 @@ import java.util.List;
 /**
  * 检索阶段
  * 负责从向量数据库中检索相关文档
+ * 支持策略模式，可切换不同的检索策略
  */
 @Slf4j
-@Component
 public class RetrievalStage implements PipelineStage {
     
-    private final ContentRetriever contentRetriever;
+    private final RetrievalStrategy retrievalStrategy;
     
-    public RetrievalStage(ContentRetriever contentRetriever) {
-        this.contentRetriever = contentRetriever;
+    public RetrievalStage(RetrievalStrategy retrievalStrategy) {
+        this.retrievalStrategy = retrievalStrategy;
     }
     
     @Override
     public void process(RagContext context) {
         String query = determineQuery(context);
-        String source = context.getSource();
         
-        log.debug("执行检索 - 查询: {}, 来源: {}", truncate(query), source);
+        log.debug("执行检索 - 查询: {}, 策略: {}", truncate(query), retrievalStrategy.getName());
         
         try {
-            // 执行检索
-            List<Document> docs = contentRetriever.retrieve(query, source);
+            // 使用策略执行检索
+            List<Document> docs = retrievalStrategy.retrieve(query, context);
             
             if (docs == null) {
                 docs = new ArrayList<>();
             }
             
-            context.setRetrievedDocs(docs);
+            context.setDocuments(docs);
             
-            log.info("检索完成 - 获得 {} 个文档", docs.size());
+            log.info("检索完成 - 获得 {} 个文档 (策略: {})", docs.size(), retrievalStrategy.getName());
             
         } catch (Exception e) {
-            log.error("检索失败: {}", e.getMessage(), e);
-            context.setRetrievedDocs(List.of());
+            log.error("检索失败 (策略: {}): {}", retrievalStrategy.getName(), e.getMessage(), e);
+            context.setDocuments(List.of());
             throw e; // 重新抛出，让管道处理
         }
     }
@@ -56,25 +54,16 @@ public class RetrievalStage implements PipelineStage {
     }
     
     @Override
-    public String getDescription() {
-        return "文档检索：从向量数据库检索相关文档";
+    public boolean shouldSkip(RagContext context) {
+        return retrievalStrategy == null;
     }
     
     /**
      * 确定使用哪个查询进行检索
      */
     private String determineQuery(RagContext context) {
-        // 优先级：扩展查询 > 增强查询 > 预处理查询 > 原始查询
-        if (context.getExpandedQuery() != null && !context.getExpandedQuery().trim().isEmpty()) {
-            return context.getExpandedQuery();
-        }
-        if (context.getEnhancedQuery() != null && !context.getEnhancedQuery().trim().isEmpty()) {
-            return context.getEnhancedQuery();
-        }
-        if (context.getPreprocessedQuery() != null && !context.getPreprocessedQuery().trim().isEmpty()) {
-            return context.getPreprocessedQuery();
-        }
-        return context.getOriginalQuestion();
+        // 直接使用当前查询（已经被各个 Stage 更新过）
+        return context.getCurrentQuery();
     }
     
     /**

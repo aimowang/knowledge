@@ -23,20 +23,18 @@ public class CompressionStage implements PipelineStage {
     
     @Override
     public void process(RagContext context) {
-        // 从上一个阶段获取文档（可能是重排序后的，也可能是过滤后的）
-        List<Document> docs = context.getRerankedDocs() != null ? 
-            context.getRerankedDocs() : context.getFilteredDocs();
+        List<Document> docs = context.getDocuments();
         
         if (docs == null || docs.isEmpty()) {
             log.debug("无文档，跳过压缩");
-            context.setFinalDocs(List.of());
+            context.setDocuments(List.of());
             return;
         }
         
         log.debug("开始压缩 - 初始文档数: {}", docs.size());
         
         List<Document> compressed = compressionStrategy.process(docs, context);
-        context.setFinalDocs(compressed);
+        context.setDocuments(compressed);
         
         log.info("压缩完成: {} -> {} 个文档", docs.size(), compressed.size());
     }
@@ -48,8 +46,7 @@ public class CompressionStage implements PipelineStage {
     
     @Override
     public boolean shouldSkip(RagContext context) {
-        List<Document> docs = context.getRerankedDocs() != null ? 
-            context.getRerankedDocs() : context.getFilteredDocs();
+        List<Document> docs = context.getDocuments();
         return docs == null || docs.isEmpty();
     }
 }

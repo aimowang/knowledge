@@ -86,22 +86,22 @@ class RagContextTest {
     }
     
     @Test
-    void testSetEnhancedQuery() {
-        context.setEnhancedQuery("Spring Boot framework definition");
+    void testSetCurrentQuery() {
+        context.setCurrentQuery("Spring Boot framework definition");
         
-        assertEquals("Spring Boot framework definition", context.getEnhancedQuery());
+        assertEquals("Spring Boot framework definition", context.getCurrentQuery());
     }
     
     @Test
-    void testSetRetrievedDocs() {
+    void testSetDocuments() {
         List<Document> docs = List.of(
             new Document("Document 1"),
             new Document("Document 2")
         );
-        context.setRetrievedDocs(docs);
+        context.setDocuments(docs);
         
-        assertNotNull(context.getRetrievedDocs());
-        assertEquals(2, context.getRetrievedDocs().size());
+        assertNotNull(context.getDocuments());
+        assertEquals(2, context.getDocuments().size());
     }
     
     @Test

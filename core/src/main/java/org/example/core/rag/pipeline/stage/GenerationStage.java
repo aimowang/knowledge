@@ -31,7 +31,7 @@ public class GenerationStage implements PipelineStage {
     
     @Override
     public void process(RagContext context) {
-        List<Document> docs = context.getFinalDocs();
+        List<Document> docs = context.getDocuments();
         
         if (docs == null || docs.isEmpty()) {
             log.debug("无文档，返回默认答案");

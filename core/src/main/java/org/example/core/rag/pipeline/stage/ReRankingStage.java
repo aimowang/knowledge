@@ -23,7 +23,7 @@ public class ReRankingStage implements PipelineStage {
     
     @Override
     public void process(RagContext context) {
-        List<Document> docs = context.getFilteredDocs();
+        List<Document> docs = context.getDocuments();
         
         if (docs == null || docs.isEmpty()) {
             log.debug("无过滤结果，跳过重排序");
@@ -32,20 +32,19 @@ public class ReRankingStage implements PipelineStage {
         
         if (reRanker == null) {
             log.debug("ReRanker 未配置，跳过重排序");
-            context.setRerankedDocs(docs);
+            context.setDocuments(docs);
             return;
         }
         
         log.debug("开始重排序 - 初始文档数: {}", docs.size());
         
-        String query = context.getExpandedQuery() != null ? 
-            context.getExpandedQuery() : context.getOriginalQuestion();
+        String query = context.getCurrentQuery();
         
         int topK = context.getRetrievalConfig().topK();
         double lambda = context.getRetrievalConfig().lambda();
         
         List<Document> reranked = reRanker.rerank(docs, query, topK, String.valueOf(lambda));
-        context.setRerankedDocs(reranked);
+        context.setDocuments(reranked);
         
         log.info("重排序完成: {} -> {} 个文档", docs.size(), reranked.size());
     }
@@ -57,7 +56,7 @@ public class ReRankingStage implements PipelineStage {
     
     @Override
     public boolean shouldSkip(RagContext context) {
-        List<Document> docs = context.getFilteredDocs();
+        List<Document> docs = context.getDocuments();
         return docs == null || docs.isEmpty() || reRanker == null;
     }
 }

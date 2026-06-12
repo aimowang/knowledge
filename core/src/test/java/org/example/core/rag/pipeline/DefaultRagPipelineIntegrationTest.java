@@ -1,7 +1,7 @@
 package org.example.core.rag.pipeline;
 
 import org.example.core.rag.context.RagContext;
-import org.example.core.rag.pipeline.stage.QueryPreprocessingStage;
+import org.example.core.rag.pipeline.stage.QueryCleaningStage;
 import org.example.model.RagAnswer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,7 +26,7 @@ class DefaultRagPipelineIntegrationTest {
     @Test
     void testExecuteWithSingleStage() {
         // 添加一个简单的阶段
-        pipeline.addStage(new QueryPreprocessingStage());
+        pipeline.addStage(new QueryCleaningStage());
         
         RagContext context = RagContext.builder()
             .originalQuestion("  Spring   Boot  ")
@@ -36,14 +36,14 @@ class DefaultRagPipelineIntegrationTest {
         RagAnswer answer = pipeline.execute(context);
         
         assertNotNull(answer);
-        assertNotNull(context.getPreprocessedQuery());
-        assertEquals("Spring Boot", context.getPreprocessedQuery());
+        assertNotNull(context.getCurrentQuery());
+        assertEquals("Spring Boot", context.getCurrentQuery());
     }
     
     @Test
     void testExecuteWithMultipleStages() {
         // 添加多个阶段
-        pipeline.addStage(new QueryPreprocessingStage());
+        pipeline.addStage(new QueryCleaningStage());
         
         RagContext context = RagContext.builder()
             .originalQuestion("  Test   Question  ")
@@ -59,7 +59,7 @@ class DefaultRagPipelineIntegrationTest {
     
     @Test
     void testRecordStageDurations() {
-        pipeline.addStage(new QueryPreprocessingStage());
+        pipeline.addStage(new QueryCleaningStage());
         
         RagContext context = RagContext.builder()
             .originalQuestion("test")
@@ -104,21 +104,21 @@ class DefaultRagPipelineIntegrationTest {
     
     @Test
     void testAddAndRemoveStages() {
-        QueryPreprocessingStage stage = new QueryPreprocessingStage();
+        QueryCleaningStage stage = new QueryCleaningStage();
         
         pipeline.addStage(stage);
         assertEquals(1, pipeline.getStages().size());
         
-        pipeline.removeStage("QueryPreprocessingStage");
+        pipeline.removeStage("QueryCleaningStage");
         assertEquals(0, pipeline.getStages().size());
     }
     
     @Test
     void testInsertStage() {
-        QueryPreprocessingStage stage1 = new QueryPreprocessingStage();
+        QueryCleaningStage stage1 = new QueryCleaningStage();
         
         pipeline.addStage(stage1);
-        pipeline.insertStage(0, new QueryPreprocessingStage());
+        pipeline.insertStage(0, new QueryCleaningStage());
         
         assertEquals(2, pipeline.getStages().size());
     }

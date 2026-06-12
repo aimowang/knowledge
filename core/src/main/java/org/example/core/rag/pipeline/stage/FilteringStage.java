@@ -23,7 +23,7 @@ public class FilteringStage implements PipelineStage {
     
     @Override
     public void process(RagContext context) {
-        List<Document> docs = context.getDeduplicatedDocs();
+        List<Document> docs = context.getDocuments();
         
         if (docs == null || docs.isEmpty()) {
             log.debug("无去重结果，跳过过滤");
@@ -33,7 +33,7 @@ public class FilteringStage implements PipelineStage {
         log.debug("开始过滤 - 初始文档数: {}", docs.size());
         
         List<Document> filtered = filteringStrategy.process(docs, context);
-        context.setFilteredDocs(filtered);
+        context.setDocuments(filtered);
         
         log.info("过滤完成: {} -> {} 个文档", docs.size(), filtered.size());
     }
@@ -45,7 +45,7 @@ public class FilteringStage implements PipelineStage {
     
     @Override
     public boolean shouldSkip(RagContext context) {
-        List<Document> docs = context.getDeduplicatedDocs();
+        List<Document> docs = context.getDocuments();
         return docs == null || docs.isEmpty();
     }
 }

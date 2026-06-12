@@ -5,7 +5,6 @@ import org.example.core.rag.orchestrator.DefaultRagOrchestrator;
 import org.example.core.rag.orchestrator.RagOrchestrator;
 import org.example.core.rag.pipeline.DefaultRagPipeline;
 import org.example.core.rag.pipeline.RagPipeline;
-import org.example.core.rag.pipeline.stage.QueryPreprocessingStage;
 import org.example.model.RagAnswer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

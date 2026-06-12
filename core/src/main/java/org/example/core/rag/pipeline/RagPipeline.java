@@ -3,6 +3,8 @@ package org.example.core.rag.pipeline;
 import org.example.core.rag.context.RagContext;
 import org.example.model.RagAnswer;
 
+import java.util.List;
+
 /**
  * RAG 处理管道接口 - 责任链模式
  * 负责编排各个处理阶段的执行
@@ -42,5 +44,5 @@ public interface RagPipeline {
      * 获取所有阶段
      * @return 阶段列表
      */
-    java.util.List<PipelineStage> getStages();
+    List<PipelineStage> getStages();
 }

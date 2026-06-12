@@ -99,7 +99,7 @@ public class DefaultRagPipeline implements RagPipeline {
         if (stageName.contains("Retrieval")) {
             // 检索失败：设置空文档列表，继续后续流程
             log.warn("检索阶段失败，使用空文档列表继续");
-            context.setRetrievedDocs(List.of());
+            context.setDocuments(List.of());
         } else if (stageName.contains("Generation")) {
             // 生成失败：设置降级答案
             log.error("生成阶段失败，返回降级答案");

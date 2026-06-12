@@ -11,8 +11,13 @@ import org.example.core.rag.pipeline.stage.CompressionStage;
 import org.example.core.rag.pipeline.stage.DeduplicationStage;
 import org.example.core.rag.pipeline.stage.FilteringStage;
 import org.example.core.rag.pipeline.stage.GenerationStage;
-import org.example.core.rag.pipeline.stage.QueryPreprocessingStage;
+import org.example.core.rag.pipeline.stage.QueryCleaningStage;
+import org.example.core.rag.pipeline.stage.QueryEnhancementStage;
+import org.example.core.rag.strategy.QueryEnhancementStrategy;
+import org.example.core.rag.strategy.RetrievalStrategy;
+import org.example.core.rag.strategy.impl.MemoryBasedQueryEnhancer;
 import org.example.core.rag.pipeline.stage.RetrievalStage;
+import org.example.core.rag.strategy.impl.DefaultRetrievalStrategy;
 import org.example.core.rag.strategy.impl.CompressionStrategy;
 import org.example.core.rag.strategy.impl.DeduplicationStrategy;
 import org.example.core.rag.strategy.impl.FilteringStrategy;
@@ -41,6 +46,7 @@ public class BasicRagFlow extends AbstractRagFlow {
     private final DeduplicationStrategy dedupStrategy;
     private final FilteringStrategy filterStrategy;
     private final CompressionStrategy compressionStrategy;
+    private final MemoryBasedQueryEnhancer memoryEnhancer;
     private final ChatClient chatClient;
     private final ResilienceHelper resilienceHelper;
 
@@ -50,6 +56,7 @@ public class BasicRagFlow extends AbstractRagFlow {
                        DeduplicationStrategy dedupStrategy,
                        FilteringStrategy filterStrategy,
                        CompressionStrategy compressionStrategy,
+                       MemoryBasedQueryEnhancer memoryEnhancer,
                        ChatClient chatClient,
                        ResilienceHelper resilienceHelper) {
         super(pipeline, orchestrator);
@@ -57,6 +64,7 @@ public class BasicRagFlow extends AbstractRagFlow {
         this.dedupStrategy = dedupStrategy;
         this.filterStrategy = filterStrategy;
         this.compressionStrategy = compressionStrategy;
+        this.memoryEnhancer = memoryEnhancer;
         this.chatClient = chatClient;
         this.resilienceHelper = resilienceHelper;
         log.info("BasicRagFlow 初始化完成 - 基于新架构");
@@ -64,15 +72,23 @@ public class BasicRagFlow extends AbstractRagFlow {
 
     @Override
     protected void configurePipeline(RagPipeline pipeline) {
-        // 配置简单管道：使用独立的后处理 Stage
-        pipeline.addStage(new QueryPreprocessingStage())
-                .addStage(new RetrievalStage(contentRetriever))
+        // 配置简单管道：使用独立的查询处理 Stage
+        // 基础版只启用记忆增强，不启用关键词扩展和多查询
+        List<QueryEnhancementStrategy> strategies = List.of(memoryEnhancer);
+        
+        // 创建默认检索策略
+        RetrievalStrategy retrievalStrategy = new DefaultRetrievalStrategy(contentRetriever);
+        
+        pipeline.addStage(new QueryCleaningStage())                    // 1. 清理
+                .addStage(new QueryEnhancementStage(strategies))       // 2. 增强（仅记忆）
+                // 3. 跳过多查询生成
+                .addStage(new RetrievalStage(retrievalStrategy))       // 4. 检索
                 .addStage(new DeduplicationStage(dedupStrategy))
                 .addStage(new FilteringStage(filterStrategy))
                 .addStage(new CompressionStage(compressionStrategy))
                 .addStage(new GenerationStage(chatClient, resilienceHelper));
         
-        log.debug("BasicRagFlow 管道配置完成 - 使用独立 Stage");
+        log.debug("BasicRagFlow 管道配置完成 - 使用独立 Stage + 记忆增强");
     }
 
     @Override

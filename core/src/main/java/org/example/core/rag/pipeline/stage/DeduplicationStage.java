@@ -23,7 +23,7 @@ public class DeduplicationStage implements PipelineStage {
     
     @Override
     public void process(RagContext context) {
-        List<Document> docs = context.getRetrievedDocs();
+        List<Document> docs = context.getDocuments();
         
         if (docs == null || docs.isEmpty()) {
             log.debug("无检索结果，跳过去重");
@@ -33,7 +33,7 @@ public class DeduplicationStage implements PipelineStage {
         log.debug("开始去重 - 初始文档数: {}", docs.size());
         
         List<Document> deduplicated = deduplicationStrategy.process(docs, context);
-        context.setDeduplicatedDocs(deduplicated);
+        context.setDocuments(deduplicated);
         
         log.info("去重完成: {} -> {} 个文档", docs.size(), deduplicated.size());
     }
@@ -45,7 +45,7 @@ public class DeduplicationStage implements PipelineStage {
     
     @Override
     public boolean shouldSkip(RagContext context) {
-        List<Document> docs = context.getRetrievedDocs();
+        List<Document> docs = context.getDocuments();
         return docs == null || docs.isEmpty();
     }
 }

@@ -32,8 +32,7 @@ public class CompressionStrategy implements DocumentProcessingStrategy {
         if (hybridCompressor != null) {
             try {
                 log.info("使用 HybridCompressor 进行上下文压缩");
-                String query = context.getExpandedQuery() != null ? 
-                    context.getExpandedQuery() : context.getOriginalQuestion();
+                String query = context.getCurrentQuery();
                 List<Document> compressed = hybridCompressor.compress(documents, query);
                 log.info("压缩后文档数: {} -> {}", documents.size(), compressed.size());
                 return compressed;

@@ -7,16 +7,16 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * QueryPreprocessingStage 单元测试
+ * QueryCleaningStage 单元测试
  */
-class QueryPreprocessingStageTest {
+class QueryCleaningStageTest {
     
-    private QueryPreprocessingStage stage;
+    private QueryCleaningStage stage;
     private RagContext context;
     
     @BeforeEach
     void setUp() {
-        stage = new QueryPreprocessingStage();
+        stage = new QueryCleaningStage();
     }
     
     @Test
@@ -28,8 +28,8 @@ class QueryPreprocessingStageTest {
         
         stage.process(context);
         
-        assertNotNull(context.getPreprocessedQuery());
-        assertEquals("Spring Boot 是什么？", context.getPreprocessedQuery());
+        assertNotNull(context.getCurrentQuery());
+        assertEquals("Spring Boot 是什么？", context.getCurrentQuery());
     }
     
     @Test
@@ -41,8 +41,8 @@ class QueryPreprocessingStageTest {
         
         stage.process(context);
         
-        assertNotNull(context.getPreprocessedQuery());
-        assertTrue(context.getPreprocessedQuery().contains("Spring"));
+        assertNotNull(context.getCurrentQuery());
+        assertTrue(context.getCurrentQuery().contains("Spring"));
     }
     
     @Test
@@ -54,13 +54,13 @@ class QueryPreprocessingStageTest {
         
         stage.process(context);
         
-        assertNotNull(context.getPreprocessedQuery());
-        assertEquals("Java是什么？", context.getPreprocessedQuery());
+        assertNotNull(context.getCurrentQuery());
+        assertEquals("Java是什么？", context.getCurrentQuery());
     }
     
     @Test
     void testGetName() {
-        assertEquals("QueryPreprocessingStage", stage.getName());
+        assertEquals("QueryCleaningStage", stage.getName());
     }
     
     @Test

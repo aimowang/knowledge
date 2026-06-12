@@ -42,60 +42,28 @@ public class RagContext {
      */
     private ComplexityLevelEnum complexity;
     
-    // ==================== 查询增强 ====================
+    // ==================== 查询处理 ====================
     
     /**
-     * 预处理后的查询
+     * 当前查询（会被各个 Stage 逐步更新）
+     * 流程：originalQuestion → preprocessed → enhanced → expanded
      */
-    private String preprocessedQuery;
+    private String currentQuery;
     
     /**
-     * 增强后的查询（指代消解后）
-     */
-    private String enhancedQuery;
-    
-    /**
-     * 关键词扩展后的查询
-     */
-    private String expandedQuery;
-    
-    /**
-     * 多查询列表
+     * 多查询列表（仅复杂问题使用）
      */
     @Builder.Default
     private List<String> multiQueries = new ArrayList<>();
     
-    // ==================== 检索结果 ====================
+    // ==================== 文档处理 ====================
     
     /**
-     * 检索到的原始文档
+     * 当前文档列表（会被各个 Stage 逐步更新）
+     * 流程：retrieved → deduplicated → filtered → reranked → final
      */
     @Builder.Default
-    private List<Document> retrievedDocs = new ArrayList<>();
-    
-    /**
-     * 去重后的文档
-     */
-    @Builder.Default
-    private List<Document> deduplicatedDocs = new ArrayList<>();
-    
-    /**
-     * 过滤后的文档
-     */
-    @Builder.Default
-    private List<Document> filteredDocs = new ArrayList<>();
-    
-    /**
-     * 重排序后的文档
-     */
-    @Builder.Default
-    private List<Document> rerankedDocs = new ArrayList<>();
-    
-    /**
-     * 压缩后的最终文档
-     */
-    @Builder.Default
-    private List<Document> finalDocs = new ArrayList<>();
+    private List<Document> documents = new ArrayList<>();
     
     // ==================== 生成结果 ====================
     
@@ -168,10 +136,31 @@ public class RagContext {
     }
     
     /**
-     * 设置最终文档（别名）
+     * 设置当前查询
      */
-    public void setFinalDocuments(List<Document> docs) {
-        this.finalDocs = docs != null ? docs : new ArrayList<>();
+    public void setCurrentQuery(String query) {
+        this.currentQuery = query;
+    }
+    
+    /**
+     * 获取当前查询
+     */
+    public String getCurrentQuery() {
+        return currentQuery != null ? currentQuery : originalQuestion;
+    }
+    
+    /**
+     * 设置当前文档列表
+     */
+    public void setDocuments(List<Document> docs) {
+        this.documents = docs != null ? docs : new ArrayList<>();
+    }
+    
+    /**
+     * 获取当前文档列表
+     */
+    public List<Document> getDocuments() {
+        return documents != null ? documents : new ArrayList<>();
     }
     
     /**
