@@ -57,7 +57,7 @@ public class ResilienceHelper {
             return TimeLimiter.decorateFutureSupplier(
                 llmTimeLimiter, 
                 () -> CompletableFuture.supplyAsync(circuitBreakerSupplier)
-            ).get();
+            ).call();
         } catch (Exception e) {
             log.warn("LLM 调用失败，触发降级逻辑: {}", e.getMessage());
             return fallback.get();
@@ -78,7 +78,7 @@ public class ResilienceHelper {
             return TimeLimiter.decorateFutureSupplier(
                 vectorSearchTimeLimiter,
                 () -> CompletableFuture.supplyAsync(circuitBreakerSupplier)
-            ).get();
+            ).call();
         } catch (Exception e) {
             log.warn("向量搜索失败，触发降级逻辑: {}", e.getMessage());
             return fallback.get();
