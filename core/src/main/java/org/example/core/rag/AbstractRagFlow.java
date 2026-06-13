@@ -9,7 +9,7 @@ import org.example.model.RagAnswer;
 
 /**
  * RAG 流程抽象基类 - 简化版
- * 
+ *
  * 设计原则：
  * 1. 极简核心：只负责编排管道和协调器
  * 2. 配置化：通过配置管道阶段实现不同功能
@@ -17,26 +17,31 @@ import org.example.model.RagAnswer;
  */
 @Slf4j
 public abstract class AbstractRagFlow implements RagFlow {
-    
-    protected final RagPipeline pipeline;
-    protected final RagOrchestrator orchestrator;
+
+    protected RagPipeline pipeline;
+    protected RagOrchestrator orchestrator;
     protected final RagMetrics ragMetrics;
-    
+
     public AbstractRagFlow(RagPipeline pipeline, RagOrchestrator orchestrator, RagMetrics ragMetrics) {
         this.pipeline = pipeline;
         this.orchestrator = orchestrator;
         this.ragMetrics = ragMetrics;
-        
-        // 子类配置管道和编排器
-        configurePipeline(pipeline);
-        configureOrchestrator(orchestrator);
-        
-        log.info("{} 初始化完成", getClass().getSimpleName());
     }
-    
+
+    /**
+     * 延迟初始化：在 Spring 完成依赖注入后和。
+     * 避免子类构造函数中调用可重写方法导致字段未初始化的问题。
+     */
+
     @Override
     public RagAnswer executeRag(String question, String userId, String source) {
-        log.debug("开始执行 RAG 流程 - 用户: {}, 来源: {}", userId, source);
+        // 配置管道
+        configurePipeline(pipeline);
+        // 配置编排器
+        configureOrchestrator(orchestrator);
+        log.info("配置完成 - 管道: {}, 编排器: {}", pipeline.getStages(), orchestrator.getConfig());
+
+        log.info("开始执行 RAG 流程 - 用户: {}, 来源: {}", userId, source);
         
         // 记录开始时间
         long startTime = System.currentTimeMillis();

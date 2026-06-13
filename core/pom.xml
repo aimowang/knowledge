@@ -46,6 +46,16 @@
         <dependency>
             <groupId>com.alibaba.cloud.ai</groupId>
             <artifactId>spring-ai-alibaba-starter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.alibaba.nacos</groupId>
+                    <artifactId>nacos-client-mse-extension</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.alibaba.cloud</groupId>
+                    <artifactId>spring-alibaba-nacos-config</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         
         <!-- Spring Boot Starter -->

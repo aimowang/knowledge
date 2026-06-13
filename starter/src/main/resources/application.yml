@@ -1,7 +1,16 @@
 spring:
+  main:
+    allow-bean-definition-overriding: true
+
   application:
     name: knowledge-rag
-  
+
+  # 文件上传限制
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+
   # 数据源配置
   datasource:
     url: jdbc:mysql://localhost:3306/knowledge_db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
@@ -42,7 +51,7 @@ spring:
   
   ai:
     dashscope:
-      api-key: ${OPENAI_API_KEY}
+      api-key: ${OPENAI_API_KEY:sk-ff8f2b4d486b4a759eb4acd0fdca5914}
       model: deepseek-v4-flush
     vectorstore:
       # Milvus 向量数据库配置（可选）
@@ -152,8 +161,8 @@ logging:
     max-size: 10MB
     max-history: 30
   
-  # Logback 配置文件（JSON 格式，支持 ELK 采集）
-  config: classpath:logback-spring-json.xml
+  # Logback 配置文件（控制台文本格式，文件 JSON 格式支持 ELK 采集）
+  config: classpath:logback-spring.xml
 
 # Actuator 监控配置
 management:

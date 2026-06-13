@@ -1,6 +1,75 @@
-version: '3.8'
+name: knowledge-deploy
 
 services:
+  # ===== Nginx 反向代理 =====
+  # 为后端 API 提供统一入口
+  # 通过 Docker 内部 DNS 访问后端容器 knowledge-rag:8080
+  nginx:
+    build:
+      context: ./deploy/nginx
+      dockerfile: Dockerfile
+    image: knowledge-nginx:latest
+    container_name: knowledge-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      app:
+        condition: service_started
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ===== 前端页面（Vue + Nginx，可选）=====
+  # 如有完整前端项目，取消下方注释即可启用
+  #frontend:
+  #  build:
+  #    context: ../knowledge-frontend
+  #    dockerfile: Dockerfile
+  #  image: knowledge-frontend:latest
+  #  container_name: knowledge-frontend
+  #  ports:
+  #    - "80:80"
+  #  depends_on:
+  #    app:
+  #      condition: service_started
+  #  networks:
+  #    - monitoring
+  #  restart: unless-stopped
+
+  # ===== 应用服务 =====
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: knowledge-rag:latest
+    container_name: knowledge-rag
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xms2g -Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/var/log/knowledge-rag/heapdump.hprof
+    volumes:
+      - app-logs:/var/log/knowledge-rag
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-s", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - monitoring
+      - milvus-net
+    restart: unless-stopped
+
   # Prometheus 监控
   prometheus:
     image: prom/prometheus:v2.48.0
@@ -74,6 +143,7 @@ services:
     command: redis-server --appendonly yes
     networks:
       - monitoring
+    restart: unless-stopped
 
   # MySQL 数据库
   mysql:
@@ -87,8 +157,15 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       - ./starter/src/main/resources/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - monitoring
+    restart: unless-stopped
 
 volumes:
   prometheus-data:
@@ -96,7 +173,12 @@ volumes:
   alertmanager-data:
   redis-data:
   mysql-data:
+  app-logs:
+  nginx-logs:
 
 networks:
   monitoring:
     driver: bridge
+  milvus-net:
+    external: true
+    name: milvus_milvus-net

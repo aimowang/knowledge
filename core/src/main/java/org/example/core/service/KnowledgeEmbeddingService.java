@@ -1,15 +1,18 @@
 package org.example.core.service;
 
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.example.core.document.DocumentLoader;
 import org.example.core.splitter.ContentSplitter;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.util.List;
 
+@Slf4j
 @Service
 public class KnowledgeEmbeddingService {
     @Resource
@@ -20,13 +23,27 @@ public class KnowledgeEmbeddingService {
     private VectorStore vectorStore;
 
 
+    @Transactional(rollbackFor = Exception.class)
     public void embedding(List<File> files) {
         for (File file : files) {
             String[] split = file.getName().split("\\.");
             String type = split[split.length - 1];
+            log.info("开始处理文件: {}, 类型: {}", file.getName(), type);
             List<Document> docs = getLoader(type).load(file);
             List<Document> chunks = getSplitter(type).split(docs);
-            vectorStore.add(chunks);
+            if (chunks.isEmpty()) {
+                log.warn("文件 {} 未产生有效分块", file.getName());
+                continue;
+            }
+            // 分批提交（API 限制每批最多 25 条）
+            int batchSize = 20;
+            for (int i = 0; i < chunks.size(); i += batchSize) {
+                int end = Math.min(i + batchSize, chunks.size());
+                List<Document> batch = chunks.subList(i, end);
+                vectorStore.add(batch);
+                log.info("文件 {} 批次 {}/{} 提交完成, {} 条", file.getName(), end, chunks.size(), batch.size());
+            }
+            log.info("文件 {} 处理完成, 共 {} 个分块", file.getName(), chunks.size());
         }
     }
 

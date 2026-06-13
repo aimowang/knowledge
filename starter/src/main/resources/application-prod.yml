@@ -1,0 +1,116 @@
+# ===== 生产环境配置 =====
+# 在 Docker Compose 网络中运行时，服务名直接使用容器名
+
+server:
+  port: 8080
+
+spring:
+  main:
+    allow-bean-definition-overriding: true
+
+  datasource:
+    url: jdbc:mysql://mysql:3306/knowledge_db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 10
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  data:
+    redis:
+      host: redis
+      port: 6379
+      password: ${REDIS_PASSWORD}
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 4
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  ai:
+    dashscope:
+      api-key: ${OPENAI_API_KEY}
+      model: deepseek-v4-flush
+    vectorstore:
+      milvus:
+        host: milvus
+        port: 19530
+        collection-name: ai_knowledge_milvus
+        embedding-dimension: 1536
+
+# 分布式追踪（生产环境降低采样率）
+  sleuth:
+    sampler:
+      probability: 0.1
+  zipkin:
+    base-url: ${ZIPKIN_URL:http://zipkin:9411}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
+
+# Resilience4j 生产配置
+resilience4j:
+  circuitbreaker:
+    instances:
+      llmCall:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+      vectorSearch:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 20s
+  retry:
+    instances:
+      llmCall:
+        max-attempts: 3
+        wait-duration: 1s
+        exponential-backoff-multiplier: 2
+      vectorSearch:
+        max-attempts: 2
+        wait-duration: 500ms
+  timelimiter:
+    instances:
+      llmCall:
+        timeout-duration: 30s
+        cancel-running-future: true
+      vectorSearch:
+        timeout-duration: 10s
+        cancel-running-future: true
+
+logging:
+  level:
+    root: INFO
+    org.example: INFO
+    org.springframework: WARN
+    org.springframework.ai: INFO
+  file:
+    name: /var/log/knowledge-rag/application.log
+    max-size: 10MB
+    max-history: 30

@@ -48,6 +48,45 @@
                 <groupId>com.alibaba.cloud.ai</groupId>
                 <artifactId>spring-ai-alibaba-starter</artifactId>
                 <version>1.0.0-M6.1</version>
+                <exclusions>
+                    <!-- 彻底排除所有 Nacos 相关依赖以避免 NoClassDefFoundError -->
+                    <exclusion>
+                        <groupId>com.alibaba.cloud</groupId>
+                        <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.alibaba.cloud</groupId>
+                        <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.alibaba.cloud</groupId>
+                        <artifactId>spring-cloud-alibaba-nacos-config</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.alibaba.cloud</groupId>
+                        <artifactId>spring-cloud-alibaba-nacos-discovery</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.alibaba.nacos</groupId>
+                        <artifactId>nacos-client</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.alibaba.nacos</groupId>
+                        <artifactId>nacos-common</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.alibaba.nacos</groupId>
+                        <artifactId>nacos-api</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.alibaba.nacos</groupId>
+                        <artifactId>nacos-core</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.alibaba.nacos</groupId>
+                        <artifactId>nacos-auth</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
             
             <!-- Spring Cloud BOM -->
@@ -57,6 +96,17 @@
                 <version>${spring-cloud.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+                <exclusions>
+                    <!-- 排除 Alibaba Cloud Nacos 依赖 -->
+                    <exclusion>
+                        <groupId>com.alibaba.cloud</groupId>
+                        <artifactId>spring-cloud-alibaba-nacos-config</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.alibaba.cloud</groupId>
+                        <artifactId>spring-cloud-alibaba-nacos-discovery</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -81,7 +131,8 @@
                 <enabled>false</enabled>
             </snapshots>
         </repository>
-        <!-- Alibaba Cloud Maven Repository -->
+        <!-- 注释掉 Alibaba Cloud 仓库以避免引入 Nacos 依赖 -->
+        <!--
         <repository>
             <id>alibaba-cloud</id>
             <name>Alibaba Cloud Repository</name>
@@ -93,7 +144,6 @@
                 <enabled>false</enabled>
             </snapshots>
         </repository>
-        <!-- Spring AI Alibaba Repository (必需) -->
         <repository>
             <id>spring-ai-alibaba</id>
             <name>Spring AI Alibaba Repository</name>
@@ -105,6 +155,7 @@
                 <enabled>false</enabled>
             </snapshots>
         </repository>
+        -->
     </repositories>
 
     <pluginRepositories>

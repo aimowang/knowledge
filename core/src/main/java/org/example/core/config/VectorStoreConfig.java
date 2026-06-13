@@ -20,7 +20,12 @@ public class VectorStoreConfig {
     }
 
     @Bean
-    public MilvusVectorStore vectorStore(MilvusServiceClient client, EmbeddingModel embedding) {
-        return MilvusVectorStore.builder(client, embedding).build();
+    public MilvusVectorStore vectorStore(MilvusServiceClient client, EmbeddingModel embedding,
+                                         @Value("${spring.ai.vectorstore.milvus.embedding-dimension}") Integer embeddingDimension,
+                                         @Value("${spring.ai.vectorstore.milvus.collection-name}") String collectionName) {
+        return MilvusVectorStore.builder(client, embedding)
+                .collectionName(collectionName)
+                .embeddingDimension(embeddingDimension)
+                .build();
     }
 }

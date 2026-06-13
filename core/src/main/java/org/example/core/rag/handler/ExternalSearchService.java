@@ -2,7 +2,6 @@ package org.example.core.rag.handler;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,12 +22,15 @@ import java.util.Map;
 @Slf4j
 @Service
 public class ExternalSearchService {
-    
-    @Resource
-    private RestClient restClient;
+
+    private final RestClient restClient;
     
     private final ObjectMapper objectMapper = new ObjectMapper();
-    
+
+    public ExternalSearchService(RestClient.Builder restClientBuilder) {
+        this.restClient = restClientBuilder.build();
+    }
+
     @Value("${external.search.api-key:}")
     private String apiKey;
     
