@@ -3,6 +3,7 @@ package org.example.core.service;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.example.core.document.DocumentLoader;
+import org.example.core.retrieval.Bm25Indexer;
 import org.example.core.splitter.ContentSplitter;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -21,6 +22,9 @@ public class KnowledgeEmbeddingService {
     private List<ContentSplitter> splitters;
     @Resource
     private VectorStore vectorStore;
+
+    @Resource
+    private Bm25Indexer bm25Indexer;
 
 
     @Transactional(rollbackFor = Exception.class)
@@ -41,7 +45,8 @@ public class KnowledgeEmbeddingService {
                 int end = Math.min(i + batchSize, chunks.size());
                 List<Document> batch = chunks.subList(i, end);
                 vectorStore.add(batch);
-                log.info("文件 {} 批次 {}/{} 提交完成, {} 条", file.getName(), end, chunks.size(), batch.size());
+                bm25Indexer.addDocuments(batch);
+                log.info("文件 {} 批次 {}/{} 提交完成, {} 条 (BM25 索引: {})", file.getName(), end, chunks.size(), batch.size(), bm25Indexer.size());
             }
             log.info("文件 {} 处理完成, 共 {} 个分块", file.getName(), chunks.size());
         }
