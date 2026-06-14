@@ -33,14 +33,17 @@ public class KnowledgeEmbeddingService {
             String[] split = file.getName().split("\\.");
             String type = split[split.length - 1];
             log.info("开始处理文件: {}, 类型: {}", file.getName(), type);
+
+            // todo: 清除字符串中的非法代理项（unpaired surrogates）以及不可见的控制字符。
+            //     * 保留合法的 Unicode 字符（包括完整代理对表示的 Emoji）
             List<Document> docs = getLoader(type).load(file);
             List<Document> chunks = getSplitter(type).split(docs);
             if (chunks.isEmpty()) {
                 log.warn("文件 {} 未产生有效分块", file.getName());
                 continue;
             }
-            // 分批提交（API 限制每批最多 25 条）
-            int batchSize = 20;
+            // 分批提交（API 限制每批最多 10 条）
+            int batchSize = 8;
             for (int i = 0; i < chunks.size(); i += batchSize) {
                 int end = Math.min(i + batchSize, chunks.size());
                 List<Document> batch = chunks.subList(i, end);

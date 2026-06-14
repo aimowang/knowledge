@@ -4,7 +4,9 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
+import org.example.core.cache.CacheService;
 import org.example.core.evaluation.EvaluationManager;
+import org.example.core.memory.ShortTermMemoryManager;
 import org.example.core.service.KnowledgeQAService;
 import org.example.model.AskRequest;
 import org.example.model.RagAnswer;
@@ -25,10 +27,15 @@ public class KnowledgeQAController {
 
     private final KnowledgeQAService qaService;
     private final EvaluationManager evaluationManager;
+    private final ShortTermMemoryManager shortTermMemoryManager;
+    private final CacheService cacheService;
 
-    public KnowledgeQAController(KnowledgeQAService qaService, EvaluationManager evaluationManager) {
+    public KnowledgeQAController(KnowledgeQAService qaService, EvaluationManager evaluationManager,
+                                  ShortTermMemoryManager shortTermMemoryManager, CacheService cacheService) {
         this.qaService = qaService;
         this.evaluationManager = evaluationManager;
+        this.shortTermMemoryManager = shortTermMemoryManager;
+        this.cacheService = cacheService;
     }
 
     /**
@@ -69,11 +76,17 @@ public class KnowledgeQAController {
      * 清空用户会话
      */
     @DeleteMapping("/session/{userId}")
-    @Operation(summary = "清空会话", description = "清除指定用户的短期记忆和评估历史")
+    @Operation(summary = "清空会话", description = "清除指定用户的会话、Redis 缓存和评估历史（前端操作 + MySQL + Redis）")
     public String clearSession(
-            @Parameter(description = "用户ID", required = true, example = "user123") 
+            @Parameter(description = "用户ID", required = true, example = "user123")
             @PathVariable String userId) {
-        evaluationManager.clearUserEvaluations(userId);
+        // 1. 清除 MySQL 评估历史
+//        evaluationManager.clearUserEvaluations(userId);
+        // 2. 清除 Redis 短时会话
+        shortTermMemoryManager.clearSession(userId);
+        // 3. 清除 Redis 问答缓存
+        cacheService.clearUserCache(userId);
+        log.info("用户 {} 的会话、缓存和评估已全部清空", userId);
         return "会话已清空";
     }
 

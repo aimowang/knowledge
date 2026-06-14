@@ -7,6 +7,7 @@ import org.example.core.rag.strategy.DocumentProcessingStrategy;
 import org.springframework.ai.document.Document;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 文档压缩阶段
@@ -25,9 +26,8 @@ public class CompressionStage implements PipelineStage {
     public void process(RagContext context) {
         List<Document> docs = context.getDocuments();
         
-        if (docs == null || docs.isEmpty()) {
-            log.debug("无文档，跳过压缩");
-            context.setDocuments(List.of());
+        if (docs == null || docs.isEmpty() || docs.stream().map(x -> Objects.requireNonNull(x.getText()).length()).reduce(Integer::sum).orElse(0) < 5000) {
+            log.debug("跳过压缩");
             return;
         }
         

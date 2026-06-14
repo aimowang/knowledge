@@ -114,14 +114,14 @@ public class HybirdContentRetriever implements ContentRetriever {
         // 构建 内容→文档 映射 (用于最终返回时还原 Document 对象)
         Map<String, Document> vectorDocByContent = new HashMap<>();
         for (Document doc : vectorDocs) {
-            if (doc.getContent() != null) {
-                vectorDocByContent.put(doc.getContent(), doc);
+            if (doc.getText() != null) {
+                vectorDocByContent.put(doc.getText(), doc);
             }
         }
         Map<String, Document> bm25DocByContent = new HashMap<>();
         for (Bm25Indexer.ScoredDocument sd : bm25Docs) {
-            if (sd.getDocument() != null && sd.getDocument().getContent() != null) {
-                bm25DocByContent.put(sd.getDocument().getContent(), sd.getDocument());
+            if (sd.getDocument() != null && sd.getDocument().getText() != null) {
+                bm25DocByContent.put(sd.getDocument().getText(), sd.getDocument());
             }
         }
 
@@ -130,7 +130,7 @@ public class HybirdContentRetriever implements ContentRetriever {
 
         // 向量排名贡献
         for (int i = 0; i < vectorDocs.size(); i++) {
-            String content = vectorDocs.get(i).getContent();
+            String content = vectorDocs.get(i).getText();
             if (content != null) {
                 rrfScores.merge(content, vectorWeight / (RRF_K + i + 1), Double::sum);
             }
@@ -139,8 +139,8 @@ public class HybirdContentRetriever implements ContentRetriever {
         // BM25 排名贡献
         for (int i = 0; i < bm25Docs.size(); i++) {
             Document doc = bm25Docs.get(i).getDocument();
-            if (doc != null && doc.getContent() != null) {
-                rrfScores.merge(doc.getContent(), bm25Weight / (RRF_K + i + 1), Double::sum);
+            if (doc != null && doc.getText() != null) {
+                rrfScores.merge(doc.getText(), bm25Weight / (RRF_K + i + 1), Double::sum);
             }
         }
 

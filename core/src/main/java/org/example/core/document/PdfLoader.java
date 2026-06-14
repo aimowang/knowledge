@@ -41,11 +41,12 @@ public class PdfLoader implements DocumentLoader {
                             .build()
             );
             List<Document> all = reader.get();
-            // 过滤掉无内容的页面
+            // 过滤掉无内容的页面并添加元数据
             List<Document> valid = new ArrayList<>();
             for (Document doc : all) {
                 String text = doc.getText();
                 if (text != null && !text.isBlank()) {
+                    doc.getMetadata().put("source", file.getName());
                     valid.add(doc);
                 }
             }
@@ -71,6 +72,7 @@ public class PdfLoader implements DocumentLoader {
             for (Document doc : all) {
                 String text = doc.getText();
                 if (text != null && !text.isBlank()) {
+                    doc.getMetadata().put("source", file.getName());
                     valid.add(doc);
                 }
             }

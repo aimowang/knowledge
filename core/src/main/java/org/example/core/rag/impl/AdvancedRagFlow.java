@@ -32,6 +32,7 @@ import org.example.core.rag.strategy.impl.MultiQueryGenerator;
 import org.example.core.retrieval.ContentRetriever;
 import org.example.core.resilience.ResilienceHelper;
 import org.example.core.rerank.ReRanker;
+import org.example.core.retrieval.HybirdContentRetriever;
 import org.example.model.enums.CategoryEnum;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
@@ -69,7 +70,7 @@ public class AdvancedRagFlow extends AbstractRagFlow {
 
     public AdvancedRagFlow(DefaultRagPipeline pipeline,
                           DefaultRagOrchestrator orchestrator,
-                          ContentRetriever contentRetriever,
+                           HybirdContentRetriever contentRetriever,
                           DeduplicationStrategy dedupStrategy,
                           FilteringStrategy filterStrategy,
                           CompressionStrategy compressionStrategy,
@@ -115,7 +116,7 @@ public class AdvancedRagFlow extends AbstractRagFlow {
                 .addStage(new RetrievalStage(retrievalStrategy, ragMetrics))  // 5. 单次检索（如果没有多查询）
                 .addStage(new CragStage(cragHandler))                  // 6. CRAG 评估与修正
                 .addStage(new DeduplicationStage(dedupStrategy))
-                .addStage(new FilteringStage(filterStrategy))
+//                .addStage(new FilteringStage(filterStrategy))
                 .addStage(new ReRankingStage(reRanker))                // 7. 重排序
                 .addStage(new CompressionStage(compressionStrategy))   // 8. 压缩
                 .addStage(new GenerationStage(chatClient, resilienceHelper, ragMetrics));  // 9. 生成

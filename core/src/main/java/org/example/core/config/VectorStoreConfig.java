@@ -22,10 +22,15 @@ public class VectorStoreConfig {
     @Bean
     public MilvusVectorStore vectorStore(MilvusServiceClient client, EmbeddingModel embedding,
                                          @Value("${spring.ai.vectorstore.milvus.embedding-dimension}") Integer embeddingDimension,
-                                         @Value("${spring.ai.vectorstore.milvus.collection-name}") String collectionName) {
+                                         @Value("${spring.ai.vectorstore.milvus.collection-name}") String collectionName,
+                                         @Value("${spring.ai.vectorstore.milvus.embedding-field}") String fieldName) {
         return MilvusVectorStore.builder(client, embedding)
                 .collectionName(collectionName)
                 .embeddingDimension(embeddingDimension)
+                .autoId(true)
+                .embeddingFieldName(fieldName)
+                // todo: 首次执行时初始化向量库结构
+                .initializeSchema(true)
                 .build();
     }
 }

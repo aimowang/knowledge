@@ -29,7 +29,7 @@ public class LLMCompressor implements DocumentCompressor {
         // 为提高效率，可以将多个短文档合并成一个批次调用 LLM，但要控制总 Token
         // 这里简单每个文档调用一次，适合文档数量较少的情况
         for (Document doc : documents) {
-            String content = doc.getFormattedContent();
+            String content = doc.getText();
             // 跳过空文档或过短文档
             if (content.trim().isEmpty()) continue;
 

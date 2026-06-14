@@ -52,7 +52,7 @@ public class Bm25Indexer {
      */
     public void addDocument(Document document) {
         if (document == null) return;
-        String text = document.getContent();
+        String text = document.getText();
         if (text == null || text.isEmpty()) return;
 
         lock.writeLock().lock();
@@ -98,11 +98,11 @@ public class Bm25Indexer {
      * 从索引中移除文档（通过内容匹配）
      */
     public void removeDocument(Document document) {
-        if (document == null || document.getContent() == null) return;
+        if (document == null || document.getText() == null) return;
 
         lock.writeLock().lock();
         try {
-            String docKey = computeDocKey(document.getContent());
+            String docKey = computeDocKey(document.getText());
             removeByKey(docKey);
         } finally {
             lock.writeLock().unlock();

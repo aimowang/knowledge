@@ -7,6 +7,7 @@ import org.example.core.memory.LongTermMemoryManager;
 import org.example.core.memory.MemoryExtractor;
 import org.example.core.memory.ShortTermMemoryManager;
 import org.example.core.rag.RagFlow;
+import org.example.core.rag.impl.AdvancedRagFlow;
 import org.example.core.retrieval.ContentRetriever;
 import org.example.model.RagAnswer;
 import org.example.model.enums.CategoryEnum;
@@ -63,13 +64,13 @@ public class KnowledgeQAService {
     }
 
     private RagFlow selectRagFlow(String category) {
+//        for (RagFlow ragFlow : ragFlows) {
+//            if (ragFlow.support().contains(category)) {
+//                return ragFlow;
+//            }
+//        }
         for (RagFlow ragFlow : ragFlows) {
-            if (ragFlow.support().contains(category)) {
-                return ragFlow;
-            }
-        }
-        for (RagFlow ragFlow : ragFlows) {
-            if (ragFlow.support().contains(CategoryEnum.ALL.getValue())) {
+            if (ragFlow instanceof AdvancedRagFlow) {
                 return ragFlow;
             }
         }

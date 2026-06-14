@@ -23,7 +23,7 @@ public class RetrievalEvaluator {
         // 将文档拼接成摘要，让 LLM 判断是否足以回答问题
         String docSummary = docs.stream()
                 .limit(5)
-                .map(Document::getFormattedContent)
+                .map(Document::getText)
                 .collect(Collectors.joining("\n---\n"));
 
         PromptTemplate template = new PromptTemplate("""

@@ -101,10 +101,18 @@ public class EvaluationManager {
         
         try {
             Object[] result = repository.getGlobalStatistics();
-            
-            long totalUsers = result[0] != null ? ((Number) result[0]).longValue() : 0;
-            long totalEvaluations = result[1] != null ? ((Number) result[1]).longValue() : 0;
-            double globalAverage = result[2] != null ? ((Number) result[2]).doubleValue() : 0.0;
+
+            // JPA 聚合查询可能返回嵌套 Object[]，自动解一层
+            if (result != null && result.length == 1 && result[0] instanceof Object[]) {
+                result = (Object[]) result[0];
+            }
+
+            long totalUsers = result != null && result.length > 0 && result[0] != null
+                    ? ((Number) result[0]).longValue() : 0;
+            long totalEvaluations = result != null && result.length > 1 && result[1] != null
+                    ? ((Number) result[1]).longValue() : 0;
+            double globalAverage = result != null && result.length > 2 && result[2] != null
+                    ? ((Number) result[2]).doubleValue() : 0.0;
             
             stats.put("totalUsers", totalUsers);
             stats.put("totalEvaluations", totalEvaluations);

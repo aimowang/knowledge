@@ -2,8 +2,10 @@ package org.example.core.config;
 
 import com.alibaba.cloud.ai.dashscope.api.DashScopeApi;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatModel;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.alibaba.cloud.ai.dashscope.embedding.text.DashScopeEmbeddingModel;
+import com.alibaba.cloud.ai.dashscope.embedding.text.DashScopeEmbeddingOptions;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.document.MetadataMode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -41,23 +43,25 @@ public class AiManualConfig {
     public DashScopeApi dashScopeApi(RestClient.Builder restClientBuilder,
                                      WebClient.Builder webClientBuilder,
                                      ResponseErrorHandler responseErrorHandler) {
-        return new DashScopeApi(
-                apiKey,
-                baseUrl,
-                restClientBuilder,
-                webClientBuilder,
-                responseErrorHandler
-        );
+        return DashScopeApi.builder()
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .restClientBuilder(restClientBuilder)
+                .webClientBuilder(webClientBuilder)
+                .responseErrorHandler(responseErrorHandler)
+                .build();
     }
 
     @Bean
     @ConditionalOnMissingBean
-    public DashScopeChatModel dashScopeChatModel(DashScopeApi dashScopeApi) {
-        DashScopeChatOptions options = DashScopeChatOptions.builder()
-                .withModel(model)
+    public DashScopeEmbeddingModel dashScopeEmbeddingModel(DashScopeApi dashScopeApi) {
+        DashScopeEmbeddingOptions options = DashScopeEmbeddingOptions.builder()
+                .model("text-embedding-v4")
+                .dimensions(1536)
                 .build();
-        return new DashScopeChatModel(dashScopeApi, options);
+        return new DashScopeEmbeddingModel(dashScopeApi, MetadataMode.EMBED, options);
     }
+
 
     @Bean
     @ConditionalOnMissingBean

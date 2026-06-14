@@ -2,6 +2,7 @@ package org.example.core.memory;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.extern.slf4j.Slf4j;
 import org.example.model.ChatMessage;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -42,6 +43,7 @@ public class ShortTermMemoryManager {
     public ShortTermMemoryManager(RedisTemplate<String, String> redisTemplate) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = new ObjectMapper();
+        this.objectMapper.registerModule(new JavaTimeModule());
     }
     
     /**

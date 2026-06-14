@@ -73,6 +73,22 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     INDEX idx_expiry_date (expiry_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Refresh Token 存储表';
 
+-- 上传文件记录表
+CREATE TABLE IF NOT EXISTS uploaded_files (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    original_name VARCHAR(255) NOT NULL COMMENT '原始文件名',
+    file_size BIGINT COMMENT '文件大小（字节）',
+    file_type VARCHAR(50) COMMENT '文件类型',
+    storage_path VARCHAR(500) COMMENT '存储路径',
+    uploaded_by VARCHAR(100) NOT NULL COMMENT '上传用户',
+    status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED' COMMENT '状态: PROCESSING/COMPLETED/FAILED',
+    error_message TEXT COMMENT '错误信息',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_uploaded_by (uploaded_by),
+    INDEX idx_created_at (created_at),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上传文件记录表';
+
 -- 插入默认测试用户（密码: password123，BCrypt加密）
 INSERT INTO users (username, password) VALUES 
 ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy')

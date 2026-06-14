@@ -1,42 +1,23 @@
 name: knowledge-deploy
 
 services:
-  # ===== Nginx 反向代理 =====
-  # 为后端 API 提供统一入口
-  # 通过 Docker 内部 DNS 访问后端容器 knowledge-rag:8080
-  nginx:
+  # ===== 前端服务（Vue + Nginx，统一入口）=====
+  # 提供静态文件服务，并反向代理 API/聊天/文档 请求到后端容器 knowledge-rag:8080
+  frontend:
     build:
-      context: ./deploy/nginx
+      context: ../knowledge-frontend
       dockerfile: Dockerfile
-    image: knowledge-nginx:latest
-    container_name: knowledge-nginx
+    image: knowledge-frontend:latest
+    container_name: knowledge-frontend
     ports:
       - "80:80"
     volumes:
-      - nginx-logs:/var/log/nginx
-    depends_on:
-      app:
-        condition: service_started
+      - frontend-logs:/var/log/nginx
+    extra_hosts:
+      - "host.docker.internal:${WINDOWS_HOST_IP}"
     networks:
       - monitoring
     restart: unless-stopped
-
-  # ===== 前端页面（Vue + Nginx，可选）=====
-  # 如有完整前端项目，取消下方注释即可启用
-  #frontend:
-  #  build:
-  #    context: ../knowledge-frontend
-  #    dockerfile: Dockerfile
-  #  image: knowledge-frontend:latest
-  #  container_name: knowledge-frontend
-  #  ports:
-  #    - "80:80"
-  #  depends_on:
-  #    app:
-  #      condition: service_started
-  #  networks:
-  #    - monitoring
-  #  restart: unless-stopped
 
   # ===== 应用服务 =====
   app:
@@ -174,7 +155,7 @@ volumes:
   redis-data:
   mysql-data:
   app-logs:
-  nginx-logs:
+  frontend-logs:
 
 networks:
   monitoring:

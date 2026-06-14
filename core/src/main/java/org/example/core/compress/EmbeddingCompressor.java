@@ -36,7 +36,7 @@ public class EmbeddingCompressor implements DocumentCompressor {
         float[] queryEmbedding = embeddingModel.embed(query);
 
         return documents.stream().map(doc -> {
-            List<String> sentences = sentencesSplitter.splitText(doc.getFormattedContent());
+            List<String> sentences = sentencesSplitter.splitText(doc.getText());
             if (sentences.size() <= minSentences) {
                 return doc;  // 太短，不压缩
             }
