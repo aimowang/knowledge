@@ -1,0 +1,14 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="ApplicationStarter" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" nameIsGenerated="true">
+    <option name="ALTERNATIVE_JRE_PATH" value="21" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
+    <module name="starter" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="org.example.ApplicationStarter" />
+    <option name="ENVIRONMENT_VARIABLES" value="OPENAI_API_KEY=sk-ff8f2b4d486b4a759eb4acd0fdca5914;DB_PASSWORD=root;REDIS_PASSWORD=;JWT_SECRET=defaultSecretKeyForProductionUseOnly123456789;EXTERNAL_SEARCH_API_KEY=" />
+    <option name="VM_PARAMETERS" value="-Xms512m -Xmx1024m" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
