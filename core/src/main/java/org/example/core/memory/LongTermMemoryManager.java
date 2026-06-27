@@ -9,6 +9,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -18,18 +19,21 @@ import java.util.stream.Collectors;
  * 长期记忆管理器（基于 MySQL + Milvus 向量检索）
  *
  * <p>记忆文本存储在 MySQL，向量存储在 Milvus（ai_memory_vectors 集合）。
- * 查询时优先使用 Milvus 语义搜索，失败时降级到关键词匹配。
+ * 渐进式读取：不加载全部记忆到内存，而是通过 Milvus 向量搜索定位相关记忆后
+ * 再按 ID 回查 MySQL 获取完整文本。关键词降级也通过分页查询限制内存占用。
  */
 @Slf4j
 @Component
 public class LongTermMemoryManager {
 
+    private static final int KEYWORD_PAGE_SIZE = 100;
+    private static final int KEYWORD_MAX_MEMORIES = 300;
+    private static final double MERGE_THRESHOLD = 0.85;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final EmbeddingModel embeddingModel;
     private final LongTermMemoryRepository repository;
     private final VectorStore memoryVectorStore;
-
-    private static final double MERGE_THRESHOLD = 0.85;
 
     public LongTermMemoryManager(EmbeddingModel embeddingModel,
                                   LongTermMemoryRepository repository,
@@ -41,7 +45,8 @@ public class LongTermMemoryManager {
 
     @PostConstruct
     public void init() {
-        log.info("长期记忆管理器初始化完成，使用 MySQL + Milvus 向量检索");
+        long count = repository.count();
+        log.info("长期记忆管理器初始化完成: MySQL={}条, 向量存储=Milvus(ai_memory_vectors)", count);
     }
 
     /**
@@ -57,7 +62,7 @@ public class LongTermMemoryManager {
             mergeMemories(existingMemory, memory);
             saveToDatabase(existingMemory);
             saveToVectorStore(existingMemory);
-            log.info("记忆合并: {}", existingMemory.getContent());
+            log.debug("记忆合并: {}", existingMemory.getContent());
             return;
         }
 
@@ -81,7 +86,7 @@ public class LongTermMemoryManager {
     }
 
     /**
-     * 将记忆向量写入 Milvus。
+     * 将记忆向量写入 Milvus（写入时计算一次向量，持久化存储）。
      */
     private void saveToVectorStore(LongTermMemory memory) {
         try {
@@ -99,9 +104,10 @@ public class LongTermMemoryManager {
     }
 
     /**
-     * 查找相似的现有记忆。
+     * 查找相似的现有记忆（优先 Milvus 向量搜索，降级到分页余弦扫描）。
      */
     private LongTermMemory findSimilarMemory(String userId, LongTermMemory newMemory) {
+        // 主路径: Milvus 语义搜索
         try {
             List<Document> results = memoryVectorStore.similaritySearch(
                     SearchRequest.builder().query(newMemory.getContent()).topK(5).build());
@@ -118,20 +124,25 @@ public class LongTermMemoryManager {
                 }
             }
         } catch (Exception e) {
-            log.warn("Milvus 相似搜索失败，降级到余弦扫描: {}", e.getMessage());
+            log.warn("Milvus 相似搜索失败，降级到分页扫描: {}", e.getMessage());
         }
-        // 降级：内存余弦相似度
-        List<LongTermMemory> memories = getUserMemoriesFromDb(userId);
+
+        // 降级: 分页加载 + 余弦相似度（不加载全部记忆）
         try {
             float[] newEmb = embedText(newMemory.getContent());
-            for (LongTermMemory existing : memories) {
-                if (existing.getType() != newMemory.getType()) continue;
-                if (cosineSimilarity(newEmb, embedText(existing.getContent())) >= MERGE_THRESHOLD) {
-                    return existing;
+            int page = 0;
+            while (page * KEYWORD_PAGE_SIZE < KEYWORD_MAX_MEMORIES) {
+                List<LongTermMemory> batch = getUserMemoriesFromDb(userId, page++);
+                if (batch.isEmpty()) break;
+                for (LongTermMemory existing : batch) {
+                    if (existing.getType() != newMemory.getType()) continue;
+                    if (cosineSimilarity(newEmb, embedText(existing.getContent())) >= MERGE_THRESHOLD) {
+                        return existing;
+                    }
                 }
             }
         } catch (Exception e) {
-            log.warn("余弦相似度比较失败", e);
+            log.warn("分页余弦扫描失败", e);
         }
         return null;
     }
@@ -152,11 +163,12 @@ public class LongTermMemoryManager {
     }
 
     /**
-     * 根据查询检索记忆（主路径: Milvus 语义搜索, 降级: 关键词匹配）。
+     * 根据查询检索记忆（主路径: Milvus 向量搜索, 降级: 分页关键词匹配）。
      */
     public List<LongTermMemory> searchMemories(String userId, String query, int topK) {
         if (query == null || query.isEmpty()) return List.of();
 
+        // 主路径: Milvus 向量搜索（渐进式，只返回 topK 结果）
         try {
             List<Document> results = memoryVectorStore.similaritySearch(
                     SearchRequest.builder().query(query).topK(topK * 2).build());
@@ -176,26 +188,48 @@ public class LongTermMemoryManager {
                     .peek(m -> m.incrementAccess())
                     .collect(Collectors.toList());
         } catch (Exception e) {
-            log.warn("Milvus 向量检索失败，降级到关键词: {}", e.getMessage());
-            return keywordSearch(getUserMemoriesFromDb(userId), query, topK);
+            log.warn("Milvus 向量检索失败，降级到分页关键词: {}", e.getMessage());
+            return keywordSearch(userId, query, topK);
         }
     }
 
-    private List<LongTermMemory> keywordSearch(List<LongTermMemory> memories, String query, int topK) {
+    /**
+     * 分页关键词匹配（降级方案，按重要性+访问量排序，限制最大 300 条）。
+     */
+    private List<LongTermMemory> keywordSearch(String userId, String query, int topK) {
         String lowerQuery = query.toLowerCase();
-        return memories.stream()
-                .filter(m -> {
-                    String c = m.getContent().toLowerCase();
-                    String k = m.getKeywords() != null ? m.getKeywords().toLowerCase() : "";
-                    return c.contains(lowerQuery) || k.contains(lowerQuery);
-                })
-                .sorted((m1, m2) -> Integer.compare(
-                    m2.getImportance() * 10 + m2.getAccessCount(),
-                    m1.getImportance() * 10 + m1.getAccessCount()))
-                .limit(topK)
-                .peek(m -> m.incrementAccess())
-                .collect(Collectors.toList());
+        List<LongTermMemory> matched = new ArrayList<>();
+        int page = 0;
+
+        while (matched.size() < topK && page * KEYWORD_PAGE_SIZE < KEYWORD_MAX_MEMORIES) {
+            List<LongTermMemory> batch = getUserMemoriesFromDb(userId, page++);
+            if (batch.isEmpty()) break;
+
+            for (LongTermMemory m : batch) {
+                String c = m.getContent().toLowerCase();
+                String k = m.getKeywords() != null ? m.getKeywords().toLowerCase() : "";
+                if (c.contains(lowerQuery) || k.contains(lowerQuery)) {
+                    matched.add(m);
+                    if (matched.size() >= topK) break;
+                }
+            }
+        }
+
+        matched.forEach(m -> m.incrementAccess());
+        return matched;
     }
+
+    /**
+     * 获取相关的长期记忆（默认 top 5）。
+     */
+    public List<LongTermMemory> getRelevantMemories(String userId, String question) {
+        if (userId == null || question == null || question.isEmpty()) return List.of();
+        return searchMemories(userId, question, 5);
+    }
+
+    /**
+     * 获取用户的记忆（分页，按重要性降序）。
+     */
 
     private float[] embedText(String text) {
         float[] embeddings = embeddingModel.embed(text);
@@ -214,18 +248,17 @@ public class LongTermMemoryManager {
         }
         return (n1 == 0 || n2 == 0) ? 0.0 : dot / (Math.sqrt(n1) * Math.sqrt(n2));
     }
-
-    public List<LongTermMemory> getRelevantMemories(String userId, String question) {
-        if (userId == null || question == null || question.isEmpty()) return List.of();
-        return searchMemories(userId, question, 5);
+    public List<LongTermMemory> getUserMemories(String userId, int page, int size) {
+        return repository.findByUserId(userId, PageRequest.of(page, size)).stream()
+                .map(this::convertToModel)
+                .collect(Collectors.toList());
     }
 
-    public List<LongTermMemory> getUserMemories(String userId) {
-        return getUserMemoriesFromDb(userId);
-    }
-
-    private List<LongTermMemory> getUserMemoriesFromDb(String userId) {
-        return repository.findByUserId(userId).stream()
+    /**
+     * 渐进式: 分页加载用户记忆（内部使用）。
+     */
+    private List<LongTermMemory> getUserMemoriesFromDb(String userId, int page) {
+        return repository.findByUserId(userId, PageRequest.of(page, KEYWORD_PAGE_SIZE)).stream()
                 .map(this::convertToModel)
                 .collect(Collectors.toList());
     }
