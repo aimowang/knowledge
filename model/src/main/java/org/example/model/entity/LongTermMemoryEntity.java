@@ -24,6 +24,10 @@ public class LongTermMemoryEntity {
     @Column(columnDefinition = "TEXT")
     private String content;
 
+    /** 内容摘要（用于列表展示，长度300字符） */
+    @Column(length = 300)
+    private String summary;
+
     private String keywords;
 
     private Integer importance;

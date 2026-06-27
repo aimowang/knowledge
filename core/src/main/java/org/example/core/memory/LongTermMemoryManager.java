@@ -77,6 +77,7 @@ public class LongTermMemoryManager {
         entity.setUserId(memory.getUserId());
         entity.setType(memory.getType().name());
         entity.setContent(memory.getContent());
+        entity.setSummary(memory.getSummary());
         entity.setKeywords(memory.getKeywords());
         entity.setImportance(memory.getImportance());
         entity.setAccessCount(memory.getAccessCount());
@@ -95,6 +96,7 @@ public class LongTermMemoryManager {
             metadata.put("userId", memory.getUserId());
             metadata.put("type", memory.getType().name());
             metadata.put("importance", memory.getImportance());
+            metadata.put("summary", memory.getSummary() != null ? memory.getSummary() : "");
 
             Document doc = new Document(memory.getContent(), memory.getId(), metadata);
             memoryVectorStore.add(List.of(doc));
@@ -248,6 +250,61 @@ public class LongTermMemoryManager {
         }
         return (n1 == 0 || n2 == 0) ? 0.0 : dot / (Math.sqrt(n1) * Math.sqrt(n2));
     }
+    /**
+     * 搜索记忆摘要（渐进式读取: 先返回轻量摘要列表）。
+     * 与 searchMemories 不同，此方法返回的 MemorySummary 仅包含
+     * id/type/summary/importance，不加载完整 content 文本。
+     */
+    public List<MemorySummary> searchMemorySummaries(String userId, String query, int topK) {
+        if (query == null || query.isEmpty()) return List.of();
+
+        try {
+            List<Document> results = memoryVectorStore.similaritySearch(
+                    SearchRequest.builder().query(query).topK(topK * 2).build());
+            return results.stream()
+                    .filter(doc -> doc.getMetadata() != null
+                            && userId.equals(doc.getMetadata().get("userId")))
+                    .map(doc -> {
+                        String memoryId = (String) doc.getMetadata().get("memoryId");
+                        String summary = (String) doc.getMetadata().getOrDefault("summary", "");
+                        String type = (String) doc.getMetadata().getOrDefault("type", "FACT");
+                        Number importance = (Number) doc.getMetadata().getOrDefault("importance", 5);
+                        if (memoryId != null) {
+                            return new MemorySummary(memoryId, type, summary, importance.intValue());
+                        }
+                        return null;
+                    })
+                    .filter(Objects::nonNull)
+                    .limit(topK)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("Milvus 摘要搜索失败，降级到关键词: {}", e.getMessage());
+            return keywordSearchSummaries(userId, query, topK);
+        }
+    }
+
+    /**
+     * 分页关键词搜索摘要（降级方案）。
+     */
+    private List<MemorySummary> keywordSearchSummaries(String userId, String query, int topK) {
+        String lowerQuery = query.toLowerCase();
+        List<MemorySummary> matched = new ArrayList<>();
+        int page = 0;
+        while (matched.size() < topK && page * KEYWORD_PAGE_SIZE < KEYWORD_MAX_MEMORIES) {
+            List<LongTermMemory> batch = getUserMemoriesFromDb(userId, page++);
+            for (LongTermMemory m : batch) {
+                String c = m.getContent() != null ? m.getContent().toLowerCase() : "";
+                String s = m.getSummary() != null ? m.getSummary().toLowerCase() : "";
+                String k = m.getKeywords() != null ? m.getKeywords().toLowerCase() : "";
+                if (c.contains(lowerQuery) || s.contains(lowerQuery) || k.contains(lowerQuery)) {
+                    matched.add(new MemorySummary(m.getId(), m.getType().name(), m.getSummary(), m.getImportance()));
+                    if (matched.size() >= topK) break;
+                }
+            }
+        }
+        return matched;
+    }
+
     public List<LongTermMemory> getUserMemories(String userId, int page, int size) {
         return repository.findByUserId(userId, PageRequest.of(page, size)).stream()
                 .map(this::convertToModel)
@@ -287,5 +344,18 @@ public class LongTermMemoryManager {
     public void clearUserMemories(String userId) {
         repository.deleteByUserId(userId);
         log.info("清空用户 {} 的所有长期记忆", userId);
+    }
+
+    /**
+     * 记忆摘要 — 轻量级记忆信息，不含完整 content 文本。
+     * 用于列表展示和渐进式读取，避免加载大量文本内容。
+     */
+    @lombok.Data
+    @lombok.AllArgsConstructor
+    public static class MemorySummary {
+        private final String id;
+        private final String type;
+        private final String summary;
+        private final int importance;
     }
 }

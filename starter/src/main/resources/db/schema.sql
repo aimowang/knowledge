@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS long_term_memories (
     user_id VARCHAR(100) NOT NULL,
     type VARCHAR(20) NOT NULL COMMENT 'FACT/PREFERENCE/CONTEXT',
     content TEXT NOT NULL,
+    summary VARCHAR(300) DEFAULT '' COMMENT '内容摘要(渐进式读取)',
     keywords VARCHAR(500),
     importance INT DEFAULT 5,
     access_count INT DEFAULT 0,
