@@ -90,6 +90,35 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='上传文件记录表';
 
 -- 插入默认测试用户（密码: password123，BCrypt加密）
-INSERT INTO users (username, password) VALUES 
+INSERT INTO users (username, password) VALUES
 ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy')
 ON DUPLICATE KEY UPDATE username=username;
+
+-- ============================================================
+-- Agentic RAG 相关表
+-- ============================================================
+
+-- Agent 执行轨迹表
+CREATE TABLE IF NOT EXISTS agent_trajectories (
+    id VARCHAR(36) PRIMARY KEY COMMENT '轨迹唯一标识（格式: traj_yyyyMMdd_xxx）',
+    user_id VARCHAR(100) NOT NULL COMMENT '用户ID',
+    query TEXT NOT NULL COMMENT '用户原始查询',
+    trajectory_json JSON NOT NULL COMMENT '完整执行轨迹（步骤列表 JSON）',
+    total_steps INT DEFAULT 0 COMMENT '总步数',
+    total_loops INT DEFAULT 0 COMMENT '总循环轮次',
+    total_duration_ms BIGINT DEFAULT 0 COMMENT '总耗时(ms)',
+    tools_used JSON COMMENT '使用的工具列表',
+    quality_scores JSON COMMENT '质量评分快照',
+    status VARCHAR(20) DEFAULT 'COMPLETED' COMMENT 'COMPLETED/FAILED/TIMEOUT',
+    error_message TEXT COMMENT '错误信息',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    archived TINYINT(1) DEFAULT 0 COMMENT '是否已归档',
+    INDEX idx_user_id (user_id),
+    INDEX idx_status (status),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent执行轨迹表';
+
+-- rag_evaluations 表扩展（新增 trajectory_id 关联）
+ALTER TABLE rag_evaluations
+    ADD COLUMN IF NOT EXISTS trajectory_id VARCHAR(36) NULL COMMENT '关联的Agent轨迹ID',
+    ADD INDEX IF NOT EXISTS idx_trajectory_id (trajectory_id);

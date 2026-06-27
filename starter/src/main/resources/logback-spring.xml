@@ -28,6 +28,13 @@
             <includeMdcKeyName>traceId</includeMdcKeyName>
             <includeMdcKeyName>spanId</includeMdcKeyName>
             <includeMdcKeyName>parentId</includeMdcKeyName>
+            <!-- Agentic RAG MDC fields -->
+            <includeMdcKeyName>trajectoryId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <includeMdcKeyName>loopCount</includeMdcKeyName>
+            <includeMdcKeyName>toolName</includeMdcKeyName>
+            <includeMdcKeyName>agentStatus</includeMdcKeyName>
+            <includeMdcKeyName>decisionType</includeMdcKeyName>
             <customFields>{"application":"knowledge-rag"}</customFields>
         </encoder>
     </appender>
@@ -45,6 +52,10 @@
             <includeMdcKeyName>traceId</includeMdcKeyName>
             <includeMdcKeyName>spanId</includeMdcKeyName>
             <includeMdcKeyName>parentId</includeMdcKeyName>
+            <!-- Agentic RAG MDC fields -->
+            <includeMdcKeyName>trajectoryId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <includeMdcKeyName>agentStatus</includeMdcKeyName>
             <customFields>{"application":"knowledge-rag","level":"ERROR"}</customFields>
         </encoder>
         <filter class="ch.qos.logback.classic.filter.LevelFilter">

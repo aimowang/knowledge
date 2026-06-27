@@ -1,6 +1,8 @@
 package org.example.core.rag.agentic.agent;
 
 import io.agentscope.core.agent.RuntimeContext;
+
+import org.slf4j.MDC;
 import io.agentscope.core.hook.Hook;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.DashScopeChatModel;
@@ -8,6 +10,9 @@ import io.agentscope.harness.agent.HarnessAgent;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.example.core.rag.agentic.quality.ContextVerdict;
+import org.example.core.rag.agentic.quality.CorrectiveRepair;
+import org.example.core.rag.agentic.quality.ReflectionReport;
+import org.example.core.rag.agentic.quality.SelfReflection;
 import org.example.core.rag.agentic.quality.SufficientContextAgent;
 import org.example.core.rag.agentic.tool.ToolRegistry;
 import org.example.core.rag.agentic.trajectory.TrajectoryRecorder;
@@ -94,6 +99,10 @@ public class AgentOrchestrator {
         AgentState state = new AgentState(query, userId, config);
         long startTime = System.currentTimeMillis();
 
+        // 设置 MDC 上下文（用于 JSON 日志关联）
+        MDC.put("trajectoryId", state.getTrajectoryId());
+        MDC.put("userId", userId);
+
         try {
             // ════════════════════════════════════════════════════════
             // 阶段 1: HarnessAgent 自主推理（ReAct 循环）
@@ -155,10 +164,30 @@ public class AgentOrchestrator {
             state.setDraftAnswer(generateDraft(query, state.getSynthesizedContext()));
 
             // ════════════════════════════════════════════════════════
-            // 阶段 4: Self-Reflection + Corrective Repair (Phase 2)
+            // 阶段 4: Self-Reflection + Corrective Repair
             // ════════════════════════════════════════════════════════
             if (config.getQuality().isSelfReflection()) {
-                log.debug("Self-Reflection 将在 Phase 2 中完整实现");
+                SelfReflection reflection = new SelfReflection(chatClient);
+                ReflectionReport report = reflection.reflect(
+                    query, null, state.getDraftAnswer(), state.getSynthesizedContext());
+                state.setReflectionReport(report);
+
+                if (report.hasIssues() && config.getQuality().isCorrectiveRepair()) {
+                    CorrectiveRepair repair = new CorrectiveRepair(chatClient, toolRegistry);
+                    int repairCount = 0;
+                    while (report.hasIssues()
+                        && repairCount < config.getAgent().getMaxRepairRetries()) {
+                        String repaired = repair.repair(
+                            query, state.getDraftAnswer(), report, state.getSynthesizedContext());
+                        state.setDraftAnswer(repaired);
+                        report = reflection.reflect(
+                            query, null, repaired, state.getSynthesizedContext());
+                        repairCount++;
+                        state.incrementRepairCount();
+                    }
+                    state.setReflectionReport(report);
+                    state.setDraftAnswer(state.getDraftAnswer());
+                }
             }
 
             // ════════════════════════════════════════════════════════
@@ -186,6 +215,11 @@ public class AgentOrchestrator {
         } finally {
             state.setTotalDurationMs(System.currentTimeMillis() - startTime);
             recorder.record(state);
+            // 清理 MDC 上下文
+            MDC.remove("trajectoryId");
+            MDC.remove("userId");
+            MDC.remove("loopCount");
+            MDC.remove("agentStatus");
         }
 
         return state;
