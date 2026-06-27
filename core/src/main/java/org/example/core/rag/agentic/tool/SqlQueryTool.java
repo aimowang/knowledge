@@ -38,10 +38,6 @@ public class SqlQueryTool implements AgentTool {
 
     private static final Logger log = LoggerFactory.getLogger(SqlQueryTool.class);
 
-    private static final List<String> FORBIDDEN_KEYWORDS = List.of(
-        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE",
-        "TRUNCATE", "GRANT", "REVOKE", "EXEC", "EXECUTE"
-    );
 
     private final JdbcTemplate jdbcTemplate;
     private final ChatClient chatClient;
@@ -159,23 +155,20 @@ public class SqlQueryTool implements AgentTool {
         return sql;
     }
 
+    private static final java.util.regex.Pattern FORBIDDEN_PATTERN =
+        java.util.regex.Pattern.compile(
+            "(DROP|ALTER|TRUNCATE|INSERT|UPDATE|DELETE|GRANT|REVOKE|EXEC|EXECUTE)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
     private String validateSql(String sql) {
         if (sql == null || sql.isBlank()) {
             return "SQL 语句为空";
         }
-        String upper = sql.trim().toUpperCase();
-        // 必须以 SELECT 开头
-        if (!upper.startsWith("SELECT")) {
+        if (!sql.trim().toUpperCase().startsWith("SELECT")) {
             return "只允许 SELECT 查询";
         }
-        // 检查禁止关键词
-        for (String keyword : FORBIDDEN_KEYWORDS) {
-            if (upper.contains(" " + keyword + " ")
-                || upper.startsWith(keyword + " ")
-                || upper.contains(" " + keyword)
-                || upper.equals(keyword)) {
-                return "包含禁止操作: " + keyword;
-            }
+        if (FORBIDDEN_PATTERN.matcher(sql).find()) {
+            return "包含禁止操作";
         }
         return null;
     }

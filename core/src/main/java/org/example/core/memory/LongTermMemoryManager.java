@@ -9,6 +9,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Component;
 
@@ -33,11 +34,11 @@ public class LongTermMemoryManager {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final EmbeddingModel embeddingModel;
     private final LongTermMemoryRepository repository;
-    private final VectorStore memoryVectorStore;
+    private final @Qualifier("memoryVectorStore") VectorStore memoryVectorStore;
 
     public LongTermMemoryManager(EmbeddingModel embeddingModel,
                                   LongTermMemoryRepository repository,
-                                  VectorStore memoryVectorStore) {
+                                  @Qualifier("memoryVectorStore") VectorStore memoryVectorStore) {
         this.embeddingModel = embeddingModel;
         this.repository = repository;
         this.memoryVectorStore = memoryVectorStore;
@@ -174,19 +175,25 @@ public class LongTermMemoryManager {
         try {
             List<Document> results = memoryVectorStore.similaritySearch(
                     SearchRequest.builder().query(query).topK(topK * 2).build());
-            return results.stream()
+            // 批量: 一次 findAllById 取代 N 次 findById
+            List<String> memoryIds = results.stream()
                     .filter(doc -> doc.getMetadata() != null
                             && userId.equals(doc.getMetadata().get("userId")))
-                    .map(doc -> {
-                        String memoryId = (String) doc.getMetadata().get("memoryId");
-                        if (memoryId != null) {
-                            var entity = repository.findById(memoryId);
-                            return entity.map(this::convertToModel).orElse(null);
-                        }
-                        return null;
-                    })
+                    .map(doc -> (String) doc.getMetadata().get("memoryId"))
                     .filter(Objects::nonNull)
                     .limit(topK)
+                    .collect(Collectors.toList());
+
+            if (memoryIds.isEmpty()) return List.of();
+
+            Map<String, LongTermMemory> memoryMap = repository.findAllById(memoryIds).stream()
+                    .map(this::convertToModel)
+                    .filter(m -> m != null)
+                    .collect(Collectors.toMap(m -> m.getId(), java.util.function.Function.identity()));
+
+            return memoryIds.stream()
+                    .map(memoryMap::get)
+                    .filter(Objects::nonNull)
                     .peek(m -> m.incrementAccess())
                     .collect(Collectors.toList());
         } catch (Exception e) {
@@ -235,9 +242,7 @@ public class LongTermMemoryManager {
 
     private float[] embedText(String text) {
         float[] embeddings = embeddingModel.embed(text);
-        float[] result = new float[embeddings.length];
-        System.arraycopy(embeddings, 0, result, 0, embeddings.length);
-        return result;
+        return embeddings;
     }
 
     private double cosineSimilarity(float[] v1, float[] v2) {

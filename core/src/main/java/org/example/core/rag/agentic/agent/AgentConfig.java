@@ -116,9 +116,9 @@ public class AgentConfig {
     @Data
     public static class Quality {
         private ContextCheck contextCheck = new ContextCheck();
-        private boolean selfReflection = true;
-        private boolean correctiveRepair = true;
-        private LlmJudge llmJudge = new LlmJudge();
+        private SelfReflectionConfig selfReflection = new SelfReflectionConfig();
+        private CorrectiveRepairConfig correctiveRepair = new CorrectiveRepairConfig();
+        private LlmJudgeConfig llmJudge = new LlmJudgeConfig();
 
         @Data
         public static class ContextCheck {
@@ -128,7 +128,18 @@ public class AgentConfig {
         }
 
         @Data
-        public static class LlmJudge {
+        public static class SelfReflectionConfig {
+            private boolean enabled = true;
+        }
+
+        @Data
+        public static class CorrectiveRepairConfig {
+            private boolean enabled = true;
+            private int maxRetries = 2;
+        }
+
+        @Data
+        public static class LlmJudgeConfig {
             private boolean enabled = false;
             private Thresholds thresholds = new Thresholds();
 
@@ -140,6 +151,7 @@ public class AgentConfig {
             }
         }
     }
+
 
     @Data
     public static class Hook {
@@ -189,7 +201,7 @@ public class AgentConfig {
 
     @Data
     public static class Routing {
-        private String strategy = "rule_llm";
+        
         private boolean forceAgentic = false;
         private boolean forceWorkflow = false;
         private int simpleThreshold = 20;

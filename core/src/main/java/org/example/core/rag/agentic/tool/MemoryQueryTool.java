@@ -126,7 +126,7 @@ public class MemoryQueryTool implements AgentTool {
 
     private String queryLongTermMemory(String userId, String query, int topK) {
         try {
-            var memories = longTermMemory.getRelevantMemories(userId, query);
+            var memories = longTermMemory.searchMemories(userId, query, topK);
             if (memories == null || memories.isEmpty()) return "";
             return memories.stream()
                 .map(m -> "[" + m.getType() + "] " + m.getContent()

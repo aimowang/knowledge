@@ -9,10 +9,10 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * API 速率限制过滤器
@@ -22,7 +22,10 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class RateLimitFilter implements Filter {
 
-    private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
+    private final Cache<String, Bucket> buckets = Caffeine.newBuilder()
+            .expireAfterAccess(Duration.ofMinutes(10))
+            .maximumSize(10000)
+            .build();
     private final int maxRequestsPerMinute;
 
     public RateLimitFilter() {
@@ -55,7 +58,7 @@ public class RateLimitFilter implements Filter {
      * 获取或创建桶
      */
     private Bucket getBucket(String ip) {
-        return buckets.computeIfAbsent(ip, key -> createNewBucket());
+        return buckets.get(ip, key -> createNewBucket());
     }
 
     /**

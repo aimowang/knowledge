@@ -184,13 +184,13 @@ public class AgentOrchestrator {
             // ════════════════════════════════════════════════════════
             // 阶段 4: Self-Reflection + Corrective Repair
             // ════════════════════════════════════════════════════════
-            if (config.getQuality().isSelfReflection()) {
+            if (config.getQuality().getSelfReflection().isEnabled()) {
                 SelfReflection reflection = new SelfReflection(fastChatClient);
                 ReflectionReport report = reflection.reflect(
                     query, null, state.getDraftAnswer(), state.getSynthesizedContext());
                 state.setReflectionReport(report);
 
-                if (report.hasIssues() && config.getQuality().isCorrectiveRepair()) {
+                if (report.hasIssues() && config.getQuality().getCorrectiveRepair().isEnabled()) {
                     CorrectiveRepair repair = new CorrectiveRepair(fullChatClient, toolRegistry);
                     int repairCount = 0;
                     while (report.hasIssues()
@@ -353,14 +353,14 @@ public class AgentOrchestrator {
             state.setDraftAnswer(draft);
 
             // ── 阶段 4: Self-Reflection — 流式场景下简化处理 ──
-            if (config.getQuality().isSelfReflection()) {
+            if (config.getQuality().getSelfReflection().isEnabled()) {
                 onEvent.accept(StreamEvent.check("正在检查答案质量..."));
                 SelfReflection reflection = new SelfReflection(fastChatClient);
                 ReflectionReport report = reflection.reflect(
                     query, null, draft, state.getSynthesizedContext());
                 state.setReflectionReport(report);
 
-                if (report.hasIssues() && config.getQuality().isCorrectiveRepair()) {
+                if (report.hasIssues() && config.getQuality().getCorrectiveRepair().isEnabled()) {
                     onEvent.accept(StreamEvent.check("发现问题，正在修复..."));
                     CorrectiveRepair repair = new CorrectiveRepair(fullChatClient, toolRegistry);
                     int rc = 0;
