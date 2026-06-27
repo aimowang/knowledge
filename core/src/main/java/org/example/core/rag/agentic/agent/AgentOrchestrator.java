@@ -11,6 +11,8 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.example.core.rag.agentic.quality.ContextVerdict;
 import org.example.core.rag.agentic.quality.CorrectiveRepair;
+import org.example.core.rag.agentic.quality.LlmJudge;
+import org.example.core.rag.agentic.quality.QualityScores;
 import org.example.core.rag.agentic.quality.ReflectionReport;
 import org.example.core.rag.agentic.quality.SelfReflection;
 import org.example.core.rag.agentic.quality.SufficientContextAgent;
@@ -199,10 +201,44 @@ public class AgentOrchestrator {
             }
 
             // ════════════════════════════════════════════════════════
-            // 阶段 5: LLM Judge (Phase 3)
+            // 阶段 5: LLM Judge 质量评估
             // ════════════════════════════════════════════════════════
             if (config.getQuality().getLlmJudge().isEnabled()) {
-                log.debug("LLM Judge 将在 Phase 3 中完整实现");
+                LlmJudge judge = new LlmJudge(chatClient);
+                QualityScores scores = judge.evaluate(
+                    query, state.getDraftAnswer(), state.getSynthesizedContext());
+                state.setQualityScores(scores);
+
+                if (!scores.isPassing(
+                    config.getQuality().getLlmJudge().getThresholds().getFaithfulness(),
+                    config.getQuality().getLlmJudge().getThresholds().getAnswerRelevancy(),
+                    config.getQuality().getLlmJudge().getThresholds().getCitationGrounding())) {
+
+                    log.warn("LLM Judge 质量门禁未通过");
+                    state.setQualityGateFailed(true);
+
+                    // 尝试重生成（最多 2 次）
+                    int retryCount = 0;
+                    int maxRetries = 2;
+                    while (!scores.isPassing(
+                        config.getQuality().getLlmJudge().getThresholds().getFaithfulness(),
+                        config.getQuality().getLlmJudge().getThresholds().getAnswerRelevancy(),
+                        config.getQuality().getLlmJudge().getThresholds().getCitationGrounding())
+                        && retryCount < maxRetries) {
+
+                        String regenerated = chatClient.prompt()
+                            .system("请重新生成答案。上次评分未通过质量门禁。"
+                                + "确保答案严格基于检索上下文，使用 [N] 标记引用，直接回答用户问题。")
+                            .user("问题: " + query + "\n上下文:\n" + state.getSynthesizedContext())
+                            .call()
+                            .content();
+                        state.setDraftAnswer(regenerated);
+                        scores = judge.evaluate(query, regenerated, state.getSynthesizedContext());
+                        retryCount++;
+                        state.incrementRepairCount();
+                    }
+                    state.setQualityScores(scores);
+                }
             }
 
             // ════════════════════════════════════════════════════════
