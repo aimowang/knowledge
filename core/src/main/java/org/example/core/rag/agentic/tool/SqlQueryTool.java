@@ -4,6 +4,7 @@ import org.example.core.rag.agentic.agent.AgentConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -46,7 +47,7 @@ public class SqlQueryTool implements AgentTool {
     private final ChatClient chatClient;
     private final AgentConfig config;
 
-    public SqlQueryTool(DataSource dataSource, ChatClient chatClient, AgentConfig config) {
+    public SqlQueryTool(DataSource dataSource, @Qualifier("fastChatClient") ChatClient chatClient, AgentConfig config) {
         this.jdbcTemplate = new JdbcTemplate(dataSource);
         this.jdbcTemplate.setQueryTimeout(
             (int) (config.getTool().getSqlQuery().getQueryTimeoutMs() / 1000));

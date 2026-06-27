@@ -9,6 +9,7 @@ import org.example.model.enums.ComplexityLevelEnum;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.Set;
@@ -43,7 +44,7 @@ public class QueryRouter {
     public QueryRouter(AdvancedRagFlow advancedRagFlow,
                        AgenticRagFlow agenticRagFlow,
                        AgentConfig agentConfig,
-                       ChatClient chatClient) {
+                       @Qualifier("fastChatClient") ChatClient chatClient) {
         this.advancedRagFlow = advancedRagFlow;
         this.agenticRagFlow = agenticRagFlow;
         this.agentConfig = agentConfig;

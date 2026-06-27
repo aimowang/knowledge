@@ -48,6 +48,7 @@
             <artifactId>agentscope-harness</artifactId>
         </dependency>
         <!-- Spring AI Alibaba Starter (包含 core 功能) -->
+
         <dependency>
             <groupId>com.alibaba.cloud.ai</groupId>
             <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>

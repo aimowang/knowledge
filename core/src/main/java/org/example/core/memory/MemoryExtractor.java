@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.model.ChatMessage;
 import org.example.model.LongTermMemory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -20,7 +21,7 @@ public class MemoryExtractor {
     
     private final ChatClient chatClient;
     
-    public MemoryExtractor(ChatClient chatClient) {
+    public MemoryExtractor(@Qualifier("fastChatClient") ChatClient chatClient) {
         this.chatClient = chatClient;
     }
     

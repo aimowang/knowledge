@@ -3,6 +3,7 @@ package org.example.core.evaluation;
 import lombok.extern.slf4j.Slf4j;
 import org.example.model.RagEvaluation;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -18,7 +19,7 @@ public class RagEvaluator {
     
     private final ChatClient chatClient;
     
-    public RagEvaluator(ChatClient chatClient) {
+    public RagEvaluator(@Qualifier("fastChatClient") ChatClient chatClient) {
         this.chatClient = chatClient;
     }
     

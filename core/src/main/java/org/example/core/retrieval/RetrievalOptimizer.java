@@ -2,6 +2,7 @@ package org.example.core.retrieval;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -17,7 +18,7 @@ public class RetrievalOptimizer {
     
     private final ChatClient chatClient;
     
-    public RetrievalOptimizer(ChatClient chatClient) {
+    public RetrievalOptimizer(@Qualifier("fastChatClient") ChatClient chatClient) {
         this.chatClient = chatClient;
     }
     

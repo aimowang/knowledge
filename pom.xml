@@ -50,6 +50,8 @@
                 <artifactId>lombok</artifactId>
                 <version>1.18.46</version>
             </dependency>
+            <!-- Spring AI Ollama Starter (本地小模型, 默认关闭) -->
+
             <!-- Spring AI Alibaba Starter (包含 core 功能) -->
             <dependency>
                 <groupId>com.alibaba.cloud.ai</groupId>

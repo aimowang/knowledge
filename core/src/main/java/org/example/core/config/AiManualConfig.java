@@ -64,7 +64,7 @@ public class AiManualConfig {
 
 
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(name = "fullChatClient")
     public ChatClient chatClient(DashScopeChatModel chatModel) {
         return ChatClient.create(chatModel);
     }

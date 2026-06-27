@@ -19,6 +19,7 @@ import org.example.model.AskRequest;
 import org.example.model.RagAnswer;
 import org.example.model.enums.CategoryEnum;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
@@ -41,7 +42,7 @@ public class KnowledgeQAService {
     private final AgentConfig agentConfig;
     private final AgentOrchestrator agentOrchestrator;
 
-    public KnowledgeQAService(ChatClient chatClient, List<ContentRetriever> retrievers,
+    public KnowledgeQAService(@Qualifier("fastChatClient") ChatClient chatClient, List<ContentRetriever> retrievers,
                              List<RagFlow> ragFlows, ShortTermMemoryManager shortTermMemoryManager,
                              LongTermMemoryManager longTermMemoryManager, MemoryExtractor memoryExtractor,
                              RagEvaluator ragEvaluator, EvaluationManager evaluationManager,

@@ -22,6 +22,7 @@ import org.example.core.rag.agentic.trajectory.TrajectoryRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -49,7 +50,11 @@ public class AgentOrchestrator {
     private final ToolRegistry toolRegistry;
     private final AgentConfig config;
     private final TrajectoryRecorder recorder;
-    private final ChatClient chatClient;
+    /** 全能力模型 — 答案生成/纠错等重量任务 */
+    private final ChatClient fullChatClient;
+
+    /** 快速模型 — 分类/检查/评分/转换等轻量任务 */
+    private final ChatClient fastChatClient;
     private final SandboxConfigurator sandboxConfigurator;
 
     private HarnessAgent harnessAgent;
@@ -57,12 +62,14 @@ public class AgentOrchestrator {
     public AgentOrchestrator(ToolRegistry toolRegistry,
                              AgentConfig config,
                              TrajectoryRecorder recorder,
-                             ChatClient chatClient,
+                             @Qualifier("fullChatClient") ChatClient fullChatClient,
+                             @Qualifier("fastChatClient") ChatClient fastChatClient,
                              SandboxConfigurator sandboxConfigurator) {
         this.toolRegistry = toolRegistry;
         this.config = config;
         this.recorder = recorder;
-        this.chatClient = chatClient;
+        this.fullChatClient = fullChatClient;
+        this.fastChatClient = fastChatClient;
         this.sandboxConfigurator = sandboxConfigurator;
     }
 
@@ -142,7 +149,7 @@ public class AgentOrchestrator {
             // 阶段 2: SufficientContextAgent 完备性检查
             // ════════════════════════════════════════════════════════
             if (config.getQuality().getContextCheck().isEnabled()) {
-                SufficientContextAgent contextAgent = new SufficientContextAgent(chatClient);
+                SufficientContextAgent contextAgent = new SufficientContextAgent(fastChatClient);
                 ContextVerdict verdict = contextAgent.check(query, state.getSynthesizedContext());
 
                 int retryCount = 0;
@@ -172,19 +179,19 @@ public class AgentOrchestrator {
             // ════════════════════════════════════════════════════════
             // 阶段 3: 生成答案草稿
             // ════════════════════════════════════════════════════════
-            state.setDraftAnswer(generateDraft(query, state.getSynthesizedContext()));
+            state.setDraftAnswer(generateDraft(query, state.getSynthesizedContext(), fullChatClient));
 
             // ════════════════════════════════════════════════════════
             // 阶段 4: Self-Reflection + Corrective Repair
             // ════════════════════════════════════════════════════════
             if (config.getQuality().isSelfReflection()) {
-                SelfReflection reflection = new SelfReflection(chatClient);
+                SelfReflection reflection = new SelfReflection(fastChatClient);
                 ReflectionReport report = reflection.reflect(
                     query, null, state.getDraftAnswer(), state.getSynthesizedContext());
                 state.setReflectionReport(report);
 
                 if (report.hasIssues() && config.getQuality().isCorrectiveRepair()) {
-                    CorrectiveRepair repair = new CorrectiveRepair(chatClient, toolRegistry);
+                    CorrectiveRepair repair = new CorrectiveRepair(fullChatClient, toolRegistry);
                     int repairCount = 0;
                     while (report.hasIssues()
                         && repairCount < config.getAgent().getMaxRepairRetries()) {
@@ -205,7 +212,7 @@ public class AgentOrchestrator {
             // 阶段 5: LLM Judge 质量评估
             // ════════════════════════════════════════════════════════
             if (config.getQuality().getLlmJudge().isEnabled()) {
-                LlmJudge judge = new LlmJudge(chatClient);
+                LlmJudge judge = new LlmJudge(fastChatClient);
                 QualityScores scores = judge.evaluate(
                     query, state.getDraftAnswer(), state.getSynthesizedContext());
                 state.setQualityScores(scores);
@@ -221,13 +228,14 @@ public class AgentOrchestrator {
                     // 尝试重生成（最多 2 次）
                     int retryCount = 0;
                     int maxRetries = 2;
+                    // 答案重生成使用 fullChatClient
                     while (!scores.isPassing(
                         config.getQuality().getLlmJudge().getThresholds().getFaithfulness(),
                         config.getQuality().getLlmJudge().getThresholds().getAnswerRelevancy(),
                         config.getQuality().getLlmJudge().getThresholds().getCitationGrounding())
                         && retryCount < maxRetries) {
 
-                        String regenerated = chatClient.prompt()
+                        String regenerated = fullChatClient.prompt()
                             .system("请重新生成答案。上次评分未通过质量门禁。"
                                 + "确保答案严格基于检索上下文，使用 [N] 标记引用，直接回答用户问题。")
                             .user("问题: " + query + "\n上下文:\n" + state.getSynthesizedContext())
@@ -315,7 +323,7 @@ public class AgentOrchestrator {
             // ── 阶段 2: 上下文完备性检查 ──
             if (config.getQuality().getContextCheck().isEnabled()) {
                 onEvent.accept(StreamEvent.check("正在检查信息完备性..."));
-                SufficientContextAgent contextAgent = new SufficientContextAgent(chatClient);
+                SufficientContextAgent contextAgent = new SufficientContextAgent(fastChatClient);
                 ContextVerdict verdict = contextAgent.check(query, state.getSynthesizedContext());
 
                 int retryCount = 0;
@@ -341,20 +349,20 @@ public class AgentOrchestrator {
 
             // ── 阶段 3: 流式生成答案 ──
             onEvent.accept(StreamEvent.generating());
-            String draft = streamGenerate(query, state.getSynthesizedContext(), onEvent);
+            String draft = streamGenerate(query, state.getSynthesizedContext(), onEvent, fullChatClient);
             state.setDraftAnswer(draft);
 
             // ── 阶段 4: Self-Reflection — 流式场景下简化处理 ──
             if (config.getQuality().isSelfReflection()) {
                 onEvent.accept(StreamEvent.check("正在检查答案质量..."));
-                SelfReflection reflection = new SelfReflection(chatClient);
+                SelfReflection reflection = new SelfReflection(fastChatClient);
                 ReflectionReport report = reflection.reflect(
                     query, null, draft, state.getSynthesizedContext());
                 state.setReflectionReport(report);
 
                 if (report.hasIssues() && config.getQuality().isCorrectiveRepair()) {
                     onEvent.accept(StreamEvent.check("发现问题，正在修复..."));
-                    CorrectiveRepair repair = new CorrectiveRepair(chatClient, toolRegistry);
+                    CorrectiveRepair repair = new CorrectiveRepair(fullChatClient, toolRegistry);
                     int rc = 0;
                     while (report.hasIssues() && rc < config.getAgent().getMaxRepairRetries()) {
                         draft = repair.repair(query, draft, report, state.getSynthesizedContext());
@@ -369,7 +377,7 @@ public class AgentOrchestrator {
 
             // ── 阶段 5: LLM Judge (可选) ──
             if (config.getQuality().getLlmJudge().isEnabled()) {
-                LlmJudge judge = new LlmJudge(chatClient);
+                LlmJudge judge = new LlmJudge(fastChatClient);
                 QualityScores scores = judge.evaluate(query, draft, state.getSynthesizedContext());
                 state.setQualityScores(scores);
                 if (!scores.isPassing(
@@ -405,7 +413,7 @@ public class AgentOrchestrator {
     /**
      * 流式生成答案（逐 Token 发射，带重试容错）。
      */
-    private String streamGenerate(String query, String context, Consumer<StreamEvent> onEvent) {
+    private String streamGenerate(String query, String context, Consumer<StreamEvent> onEvent, ChatClient chatClient) {
         if (context == null || context.isBlank()) {
             String msg = "抱歉，未检索到与问题相关的信息。";
             onEvent.accept(StreamEvent.token(msg));
@@ -427,13 +435,13 @@ public class AgentOrchestrator {
             return full.toString();
         } catch (Exception e) {
             log.warn("流式生成异常，回退到非流式: {}", e.getMessage());
-            String fallback = generateDraft(query, context);
+            String fallback = generateDraft(query, context, chatClient);
             onEvent.accept(StreamEvent.token(fallback));
             return fallback;
         }
     }
 
-    private String generateDraft(String query, String context) {
+    private String generateDraft(String query, String context, ChatClient chatClient) {
         if (context == null || context.isBlank()) {
             return "抱歉，未检索到与问题相关的信息。";
         }
