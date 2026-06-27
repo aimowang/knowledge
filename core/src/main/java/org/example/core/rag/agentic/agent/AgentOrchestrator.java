@@ -14,6 +14,7 @@ import org.example.core.rag.agentic.quality.CorrectiveRepair;
 import org.example.core.rag.agentic.quality.ReflectionReport;
 import org.example.core.rag.agentic.quality.SelfReflection;
 import org.example.core.rag.agentic.quality.SufficientContextAgent;
+import org.example.core.rag.agentic.sandbox.SandboxConfigurator;
 import org.example.core.rag.agentic.tool.ToolRegistry;
 import org.example.core.rag.agentic.trajectory.TrajectoryRecorder;
 import org.slf4j.Logger;
@@ -46,17 +47,20 @@ public class AgentOrchestrator {
     private final AgentConfig config;
     private final TrajectoryRecorder recorder;
     private final ChatClient chatClient;
+    private final SandboxConfigurator sandboxConfigurator;
 
     private HarnessAgent harnessAgent;
 
     public AgentOrchestrator(ToolRegistry toolRegistry,
                              AgentConfig config,
                              TrajectoryRecorder recorder,
-                             ChatClient chatClient) {
+                             ChatClient chatClient,
+                             SandboxConfigurator sandboxConfigurator) {
         this.toolRegistry = toolRegistry;
         this.config = config;
         this.recorder = recorder;
         this.chatClient = chatClient;
+        this.sandboxConfigurator = sandboxConfigurator;
     }
 
     @PostConstruct
@@ -76,7 +80,7 @@ public class AgentOrchestrator {
      * 构建 HarnessAgent。
      */
     private HarnessAgent buildHarnessAgent() {
-        return HarnessAgent.builder()
+        HarnessAgent.Builder builder = HarnessAgent.builder()
             .name(config.getAgent().getName())
             .workspace(java.nio.file.Paths.get(config.getWorkspace().getPath()))
             .model(DashScopeChatModel.builder()
@@ -88,8 +92,12 @@ public class AgentOrchestrator {
             .hooks(List.of(
                 new QualityCheckHook(),
                 new MetricsCollectHook()
-            ))
-            .build();
+            ));
+
+        // 可选：按需启用沙箱隔离
+        sandboxConfigurator.configure(builder);
+
+        return builder.build();
     }
 
     /**
