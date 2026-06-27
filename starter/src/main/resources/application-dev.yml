@@ -233,7 +233,7 @@ agentic-rag:
       enabled: false
     memory-query:
       top-k: 5
-      enabled: false
+      enabled: true
   workspace:
     path: "./workspace/knowledge-agent"
     auto-init: true

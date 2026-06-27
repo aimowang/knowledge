@@ -5,73 +5,69 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.example.core.repository.LongTermMemoryRepository;
 import org.example.model.LongTermMemory;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * 长期记忆管理器（基于 MySQL + 向量检索）
+ * 长期记忆管理器（基于 MySQL + Milvus 向量检索）
+ *
+ * <p>记忆文本存储在 MySQL，向量存储在 Milvus（ai_memory_vectors 集合）。
+ * 查询时优先使用 Milvus 语义搜索，失败时降级到关键词匹配。
  */
 @Slf4j
 @Component
 public class LongTermMemoryManager {
-    
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final EmbeddingModel embeddingModel;
     private final LongTermMemoryRepository repository;
-    
-    /**
-     * 用户ID -> 记忆向量缓存 (memoryId -> embedding)
-     */
-    private final Map<String, Map<String, float[]>> memoryEmbeddings = new ConcurrentHashMap<>();
-    
-    /**
-     * 记忆合并阈值（余弦相似度）
-     */
+    private final VectorStore memoryVectorStore;
+
     private static final double MERGE_THRESHOLD = 0.85;
-    
-    public LongTermMemoryManager(EmbeddingModel embeddingModel, LongTermMemoryRepository repository) {
+
+    public LongTermMemoryManager(EmbeddingModel embeddingModel,
+                                  LongTermMemoryRepository repository,
+                                  VectorStore memoryVectorStore) {
         this.embeddingModel = embeddingModel;
         this.repository = repository;
-    }
-    
-    @PostConstruct
-    public void init() {
-        log.info("长期记忆管理器初始化完成，使用 MySQL 持久化");
-        scheduleMemoryCleanup();
+        this.memoryVectorStore = memoryVectorStore;
     }
 
-    private void scheduleMemoryCleanup() {
-        // 定期清理
+    @PostConstruct
+    public void init() {
+        log.info("长期记忆管理器初始化完成，使用 MySQL + Milvus 向量检索");
     }
 
     /**
-     * 添加记忆（自动检查合并）
+     * 添加记忆（自动检查合并 + 写入 Milvus 向量）。
      */
     public void addMemory(LongTermMemory memory) {
         if (memory.getId() == null || memory.getId().isEmpty()) {
             memory.setId(UUID.randomUUID().toString());
         }
-        
-        // 1. 检查是否可以合并到现有记忆
+
         LongTermMemory existingMemory = findSimilarMemory(memory.getUserId(), memory);
         if (existingMemory != null) {
             mergeMemories(existingMemory, memory);
             saveToDatabase(existingMemory);
-            log.info("记忆合并: {} + {}", existingMemory.getContent(), memory.getContent());
+            saveToVectorStore(existingMemory);
+            log.info("记忆合并: {}", existingMemory.getContent());
             return;
         }
-        
-        // 2. 添加新记忆
+
         saveToDatabase(memory);
+        saveToVectorStore(memory);
         log.info("为用户 {} 添加长期记忆: {}", memory.getUserId(), memory.getContent());
     }
-    
+
     private void saveToDatabase(LongTermMemory memory) {
-        org.example.model.entity.LongTermMemoryEntity entity = new org.example.model.entity.LongTermMemoryEntity();
+        var entity = new org.example.model.entity.LongTermMemoryEntity();
         entity.setId(memory.getId());
         entity.setUserId(memory.getUserId());
         entity.setType(memory.getType().name());
@@ -83,225 +79,161 @@ public class LongTermMemoryManager {
         entity.setLastAccessedAt(memory.getLastAccessedAt());
         repository.save(entity);
     }
-    
+
     /**
-     * 查找相似的记忆
+     * 将记忆向量写入 Milvus。
+     */
+    private void saveToVectorStore(LongTermMemory memory) {
+        try {
+            Map<String, Object> metadata = new HashMap<>();
+            metadata.put("memoryId", memory.getId());
+            metadata.put("userId", memory.getUserId());
+            metadata.put("type", memory.getType().name());
+            metadata.put("importance", memory.getImportance());
+
+            Document doc = new Document(memory.getContent(), memory.getId(), metadata);
+            memoryVectorStore.add(List.of(doc));
+        } catch (Exception e) {
+            log.warn("记忆向量写入 Milvus 失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 查找相似的现有记忆。
      */
     private LongTermMemory findSimilarMemory(String userId, LongTermMemory newMemory) {
-        List<LongTermMemory> memories = getUserMemoriesFromDb(userId);
-        
         try {
-            float[] newEmbedding = embedText(newMemory.getContent() + " " + 
-                (newMemory.getKeywords() != null ? newMemory.getKeywords() : ""));
-            
-            for (LongTermMemory existing : memories) {
-                if (existing.getType() != newMemory.getType()) {
-                    continue;
-                }
-                
-                float[] existingEmbedding = getOrCreateEmbedding(userId, existing);
-                if (existingEmbedding != null) {
-                    double similarity = cosineSimilarity(newEmbedding, existingEmbedding);
-                    if (similarity >= MERGE_THRESHOLD) {
-                        return existing;
+            List<Document> results = memoryVectorStore.similaritySearch(
+                    SearchRequest.builder().query(newMemory.getContent()).topK(5).build());
+            for (Document doc : results) {
+                String type = doc.getMetadata() != null ? (String) doc.getMetadata().get("type") : "";
+                if (type.equals(newMemory.getType().name())) {
+                    String memoryId = doc.getMetadata() != null ? (String) doc.getMetadata().get("memoryId") : null;
+                    if (memoryId != null) {
+                        var entity = repository.findById(memoryId);
+                        if (entity.isPresent()) {
+                            return convertToModel(entity.get());
+                        }
                     }
                 }
             }
         } catch (Exception e) {
-            log.warn("查找相似记忆失败", e);
+            log.warn("Milvus 相似搜索失败，降级到余弦扫描: {}", e.getMessage());
         }
-        
+        // 降级：内存余弦相似度
+        List<LongTermMemory> memories = getUserMemoriesFromDb(userId);
+        try {
+            float[] newEmb = embedText(newMemory.getContent());
+            for (LongTermMemory existing : memories) {
+                if (existing.getType() != newMemory.getType()) continue;
+                if (cosineSimilarity(newEmb, embedText(existing.getContent())) >= MERGE_THRESHOLD) {
+                    return existing;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("余弦相似度比较失败", e);
+        }
         return null;
     }
-    
-    /**
-     * 合并两个相似的记忆
-     */
+
     private void mergeMemories(LongTermMemory existing, LongTermMemory newMemory) {
-        // 1. 保留更重要的内容
         if (newMemory.getImportance() > existing.getImportance()) {
             existing.setContent(newMemory.getContent());
             existing.setImportance(newMemory.getImportance());
         }
-        
-        // 2. 合并关键词（去重）
-        String existingKeywords = existing.getKeywords() != null ? existing.getKeywords() : "";
-        String newKeywords = newMemory.getKeywords() != null ? newMemory.getKeywords() : "";
-        
-        Set<String> keywordSet = new LinkedHashSet<>();
-        if (!existingKeywords.isEmpty()) {
-            keywordSet.addAll(Arrays.asList(existingKeywords.split(",")));
-        }
-        if (!newKeywords.isEmpty()) {
-            keywordSet.addAll(Arrays.asList(newKeywords.split(",")));
-        }
-        existing.setKeywords(String.join(",", keywordSet));
-        
-        // 3. 提升重要性（最多到10）
+        String ek = existing.getKeywords() != null ? existing.getKeywords() : "";
+        String nk = newMemory.getKeywords() != null ? newMemory.getKeywords() : "";
+        Set<String> kw = new LinkedHashSet<>();
+        if (!ek.isEmpty()) kw.addAll(Arrays.asList(ek.split(",")));
+        if (!nk.isEmpty()) kw.addAll(Arrays.asList(nk.split(",")));
+        existing.setKeywords(String.join(",", kw));
         existing.setImportance(Math.min(10, existing.getImportance() + 1));
-        
-        // 4. 更新最后访问时间
         existing.setLastAccessedAt(java.time.LocalDateTime.now());
-        
-        log.info("记忆合并完成: 内容={}, 关键词={}, 重要性={}", 
-            existing.getContent(), existing.getKeywords(), existing.getImportance());
     }
-    
+
     /**
-     * 根据查询检索记忆（向量相似度检索）
+     * 根据查询检索记忆（主路径: Milvus 语义搜索, 降级: 关键词匹配）。
      */
     public List<LongTermMemory> searchMemories(String userId, String query, int topK) {
-        List<LongTermMemory> memories = getUserMemoriesFromDb(userId);
-        
-        if (memories.isEmpty() || query == null || query.isEmpty()) {
-            return List.of();
-        }
-        
+        if (query == null || query.isEmpty()) return List.of();
+
         try {
-            float[] queryEmbedding = embedText(query);
-            List<MemoryScore> scoredMemories = new ArrayList<>();
-            for (LongTermMemory memory : memories) {
-                float[] memoryEmbedding = getOrCreateEmbedding(userId, memory);
-                if (memoryEmbedding != null) {
-                    double similarity = cosineSimilarity(queryEmbedding, memoryEmbedding);
-                    scoredMemories.add(new MemoryScore(memory, similarity));
-                }
-            }
-            
-            return scoredMemories.stream()
-                    .sorted((a, b) -> Double.compare(b.similarity, a.similarity))
+            List<Document> results = memoryVectorStore.similaritySearch(
+                    SearchRequest.builder().query(query).topK(topK * 2).build());
+            return results.stream()
+                    .filter(doc -> doc.getMetadata() != null
+                            && userId.equals(doc.getMetadata().get("userId")))
+                    .map(doc -> {
+                        String memoryId = (String) doc.getMetadata().get("memoryId");
+                        if (memoryId != null) {
+                            var entity = repository.findById(memoryId);
+                            return entity.map(this::convertToModel).orElse(null);
+                        }
+                        return null;
+                    })
+                    .filter(Objects::nonNull)
                     .limit(topK)
-                    .peek(ms -> ms.memory.incrementAccess())
-                    .map(ms -> ms.memory)
+                    .peek(m -> m.incrementAccess())
                     .collect(Collectors.toList());
-                    
         } catch (Exception e) {
-            log.error("向量检索失败，降级为关键词匹配", e);
-            return keywordSearch(memories, query, topK);
+            log.warn("Milvus 向量检索失败，降级到关键词: {}", e.getMessage());
+            return keywordSearch(getUserMemoriesFromDb(userId), query, topK);
         }
     }
-    
-    /**
-     * 关键词匹配（降级方案）
-     */
+
     private List<LongTermMemory> keywordSearch(List<LongTermMemory> memories, String query, int topK) {
         String lowerQuery = query.toLowerCase();
-        
         return memories.stream()
                 .filter(m -> {
-                    String content = m.getContent().toLowerCase();
-                    String keywords = m.getKeywords() != null ? m.getKeywords().toLowerCase() : "";
-                    return content.contains(lowerQuery) || keywords.contains(lowerQuery);
+                    String c = m.getContent().toLowerCase();
+                    String k = m.getKeywords() != null ? m.getKeywords().toLowerCase() : "";
+                    return c.contains(lowerQuery) || k.contains(lowerQuery);
                 })
-                .sorted((m1, m2) -> {
-                    int score1 = m1.getImportance() * 10 + m1.getAccessCount();
-                    int score2 = m2.getImportance() * 10 + m2.getAccessCount();
-                    return Integer.compare(score2, score1);
-                })
+                .sorted((m1, m2) -> Integer.compare(
+                    m2.getImportance() * 10 + m2.getAccessCount(),
+                    m1.getImportance() * 10 + m1.getAccessCount()))
                 .limit(topK)
                 .peek(m -> m.incrementAccess())
                 .collect(Collectors.toList());
     }
-    
-    /**
-     * 获取或创建记忆的向量表示
-     */
-    private float[] getOrCreateEmbedding(String userId, LongTermMemory memory) {
-        Map<String, float[]> userEmbeddings = memoryEmbeddings.computeIfAbsent(userId, k -> new HashMap<>());
-        
-        return userEmbeddings.computeIfAbsent(memory.getId(), id -> {
-            try {
-                // 结合内容和关键词生成向量
-                String text = memory.getContent() + " " + (memory.getKeywords() != null ? memory.getKeywords() : "");
-                return embedText(text);
-            } catch (Exception e) {
-                log.warn("生成记忆向量失败: {}", memory.getId(), e);
-                return null;
-            }
-        });
-    }
-    
-    /**
-     * 文本向量化
-     */
+
     private float[] embedText(String text) {
         float[] embeddings = embeddingModel.embed(text);
         float[] result = new float[embeddings.length];
-        for (int i = 0; i < embeddings.length; i++) {
-            result[i] = embeddings[i];
-        }
+        System.arraycopy(embeddings, 0, result, 0, embeddings.length);
         return result;
     }
-    
-    /**
-     * 计算余弦相似度
-     */
-    private double cosineSimilarity(float[] vec1, float[] vec2) {
-        if (vec1 == null || vec2 == null || vec1.length != vec2.length) {
-            return 0.0;
+
+    private double cosineSimilarity(float[] v1, float[] v2) {
+        if (v1 == null || v2 == null || v1.length != v2.length) return 0.0;
+        double dot = 0.0, n1 = 0.0, n2 = 0.0;
+        for (int i = 0; i < v1.length; i++) {
+            dot += v1[i] * v2[i];
+            n1 += v1[i] * v1[i];
+            n2 += v2[i] * v2[i];
         }
-        
-        double dotProduct = 0.0;
-        double norm1 = 0.0;
-        double norm2 = 0.0;
-        
-        for (int i = 0; i < vec1.length; i++) {
-            dotProduct += vec1[i] * vec2[i];
-            norm1 += vec1[i] * vec1[i];
-            norm2 += vec2[i] * vec2[i];
-        }
-        
-        if (norm1 == 0 || norm2 == 0) {
-            return 0.0;
-        }
-        
-        return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
+        return (n1 == 0 || n2 == 0) ? 0.0 : dot / (Math.sqrt(n1) * Math.sqrt(n2));
     }
-    
-    /**
-     * 记忆评分内部类
-     */
-    private static class MemoryScore {
-        final LongTermMemory memory;
-        final double similarity;
-        
-        MemoryScore(LongTermMemory memory, double similarity) {
-            this.memory = memory;
-            this.similarity = similarity;
-        }
+
+    public List<LongTermMemory> getRelevantMemories(String userId, String question) {
+        if (userId == null || question == null || question.isEmpty()) return List.of();
+        return searchMemories(userId, question, 5);
     }
-    
-    /**
-     * 获取用户的所有记忆
-     */
+
     public List<LongTermMemory> getUserMemories(String userId) {
         return getUserMemoriesFromDb(userId);
     }
-    
-    /**
-     * 获取相关的长期记忆（基于问题内容）
-     * 这是编排器调用的方法，内部调用 searchMemories
-     */
-    public List<LongTermMemory> getRelevantMemories(String userId, String question) {
-        if (userId == null || question == null || question.isEmpty()) {
-            return List.of();
-        }
-        
-        // 使用向量检索获取最相关的 top 5 条记忆
-        return searchMemories(userId, question, 5);
-    }
-    
+
     private List<LongTermMemory> getUserMemoriesFromDb(String userId) {
         return repository.findByUserId(userId).stream()
                 .map(this::convertToModel)
                 .collect(Collectors.toList());
     }
-    
+
     private LongTermMemory convertToModel(org.example.model.entity.LongTermMemoryEntity entity) {
-        LongTermMemory memory = new LongTermMemory(entity.getUserId(), 
-                LongTermMemory.MemoryType.valueOf(entity.getType()), 
-                entity.getContent(), 
-                entity.getKeywords());
+        LongTermMemory memory = new LongTermMemory(entity.getUserId(),
+                LongTermMemory.MemoryType.valueOf(entity.getType()),
+                entity.getContent(), entity.getKeywords());
         memory.setId(entity.getId());
         memory.setImportance(entity.getImportance());
         memory.setAccessCount(entity.getAccessCount());
@@ -309,10 +241,7 @@ public class LongTermMemoryManager {
         memory.setLastAccessedAt(entity.getLastAccessedAt());
         return memory;
     }
-    
-    /**
-     * 删除记忆
-     */
+
     public boolean deleteMemory(String userId, String memoryId) {
         if (repository.findById(memoryId).isPresent()) {
             repository.deleteById(memoryId);
@@ -321,20 +250,9 @@ public class LongTermMemoryManager {
         }
         return false;
     }
-    
-    /**
-     * 清空用户的所有记忆
-     */
+
     public void clearUserMemories(String userId) {
         repository.deleteByUserId(userId);
-        memoryEmbeddings.remove(userId);
         log.info("清空用户 {} 的所有长期记忆", userId);
-    }
-    
-    /**
-     * 从数据库加载所有记忆
-     */
-    private void loadAllMemories() {
-        log.info("从 MySQL 加载长期记忆完成，共 {} 条", repository.count());
     }
 }

@@ -33,4 +33,20 @@ public class VectorStoreConfig {
                 .initializeSchema(true)
                 .build();
     }
+
+    /**
+     * 记忆向量存储 - 用于长期记忆的语义检索。
+     * 使用独立集合 ai_memory_vectors。
+     */
+    @Bean
+    public MilvusVectorStore memoryVectorStore(MilvusServiceClient client, EmbeddingModel embedding,
+                                               @Value("${spring.ai.vectorstore.milvus.embedding-dimension}") Integer dimension) {
+        return MilvusVectorStore.builder(client, embedding)
+                .collectionName("ai_memory_vectors")
+                .embeddingDimension(dimension)
+                .autoId(false)
+                .embeddingFieldName("vector")
+                .initializeSchema(true)
+                .build();
+    }
 }
