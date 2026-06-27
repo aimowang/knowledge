@@ -7,8 +7,13 @@ import org.example.core.memory.LongTermMemoryManager;
 import org.example.core.memory.MemoryExtractor;
 import org.example.core.memory.ShortTermMemoryManager;
 import org.example.core.rag.RagFlow;
+import org.example.core.rag.agentic.agent.AgentConfig;
+import org.example.core.rag.agentic.router.QueryRouter;
 import org.example.core.rag.impl.AdvancedRagFlow;
 import org.example.core.retrieval.ContentRetriever;
+import org.example.model.AgenticAskRequest;
+import org.example.model.AgenticAskResponse;
+import org.example.model.AskRequest;
 import org.example.model.RagAnswer;
 import org.example.model.enums.CategoryEnum;
 import org.springframework.ai.chat.client.ChatClient;
@@ -30,11 +35,14 @@ public class KnowledgeQAService {
     private final MemoryExtractor memoryExtractor;
     private final RagEvaluator ragEvaluator;
     private final EvaluationManager evaluationManager;
+    private final QueryRouter queryRouter;
+    private final AgentConfig agentConfig;
 
-    public KnowledgeQAService(ChatClient chatClient, List<ContentRetriever> retrievers, 
+    public KnowledgeQAService(ChatClient chatClient, List<ContentRetriever> retrievers,
                              List<RagFlow> ragFlows, ShortTermMemoryManager shortTermMemoryManager,
                              LongTermMemoryManager longTermMemoryManager, MemoryExtractor memoryExtractor,
-                             RagEvaluator ragEvaluator, EvaluationManager evaluationManager) {
+                             RagEvaluator ragEvaluator, EvaluationManager evaluationManager,
+                             QueryRouter queryRouter, AgentConfig agentConfig) {
         this.chatClient = chatClient;
         this.retrievers = retrievers;
         this.ragFlows = ragFlows;
@@ -43,6 +51,8 @@ public class KnowledgeQAService {
         this.memoryExtractor = memoryExtractor;
         this.ragEvaluator = ragEvaluator;
         this.evaluationManager = evaluationManager;
+        this.queryRouter = queryRouter;
+        this.agentConfig = agentConfig;
     }
 
     /**
@@ -77,6 +87,50 @@ public class KnowledgeQAService {
         return ragFlows.get(0);
     }
 
+
+    // ════════════════════════════════════════════════════════════
+    // Agentic RAG
+    // ════════════════════════════════════════════════════════════
+
+    /**
+     * Agentic RAG 问答 — 通过 QueryRouter 路由到 Workflow 或 Agentic 模式。
+     */
+    public AgenticAskResponse askWithAgentic(AgenticAskRequest request) {
+        // 基础校验
+        if (request.getQuestion() == null || request.getQuestion().isBlank()) {
+            throw new IllegalArgumentException("question must not be blank");
+        }
+
+        // 将 AgenticAskRequest 转为 AskRequest（兼容现有路由逻辑）
+        AskRequest askRequest = new AskRequest();
+        askRequest.setUserId(request.getUserId());
+        askRequest.setQuestion(request.getQuestion());
+
+        // 如果请求中有自定义配置，临时覆盖
+        if (request.getConfig() != null) {
+            if (request.getConfig().getForceAgentic() != null) {
+                agentConfig.getRouting().setForceAgentic(
+                    request.getConfig().getForceAgentic());
+            }
+            if (request.getConfig().getEnableExternalSearch() != null) {
+                agentConfig.getTool().getExternalSearch().setEnabled(
+                    request.getConfig().getEnableExternalSearch());
+            }
+        }
+
+        // 路由执行
+        RagAnswer answer = queryRouter.route(askRequest);
+
+        // 构建 Agentic 响应
+        AgenticAskResponse response = AgenticAskResponse.builder()
+            .answer(answer.getAnswer())
+            .sources(answer.getSources())
+            .agenticMode(true)
+            .totalDurationMs(0)
+            .build();
+
+        return response;
+    }
 
     /**
      * 根据问题内容获取分类

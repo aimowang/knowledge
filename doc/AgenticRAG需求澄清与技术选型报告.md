@@ -1,6 +1,6 @@
 # Agentic RAG 项目 — 需求澄清与技术选型报告
 
-**文档版本**: v1.0  
+**文档版本**: v1.1  
 **编写日期**: 2026-06-14  
 **项目名称**: RAG 智能知识库问答系统  
 **文档类型**: 需求澄清 + 技术选型
@@ -12,6 +12,7 @@
 | 版本 | 日期 | 修订内容 |
 |------|------|---------|
 | v1.0 | 2026-06-14 | 初稿：需求澄清 + 框架对比 + 技术选型 |
+| v1.1 | 2026-06-14 | 新增 AgentScope-Java 框架对比，更新选型推荐为 Spring AI Alibaba + AgentScope-Java 双框架方案 |
 
 ---
 
@@ -146,10 +147,10 @@
 | 框架 | 版本 | 定位 | Stars | 厂商 |
 |------|------|------|-------|------|
 | **Spring AI** | 1.1.7 (稳定) / 2.0.0-RC1 (2026.06) | Spring 官方 AI 框架 | - | VMware / Broadcom |
-| **LangChain4j** | 1.13.0 (2026.04) | 全能型 LLM 框架 | 高 | 社区 + LangChain |
 | **Spring AI Alibaba** | 1.1.2.3 (2026.02) | 企业级 AI Agent 全栈 | 9.9k+ | Alibaba |
+| **AgentScope-Java** | 1.0.11 / 2.0.0-RC1 (2026.06) | 企业级多智能体引擎 | 14k+ | Alibaba 通义实验室 |
+| **LangChain4j** | 1.13.0 (2026.04) | 全能型 LLM 框架 | 13k+ | 社区 + LangChain |
 | **LangGraph4j** | 1.7.10 | 状态机工作流引擎 | - | 社区 |
-| **Koog** | 2026.04 | Agent 编排层 | - | JetBrains |
 
 ### 3.2 本项目当前依赖
 
@@ -165,18 +166,21 @@ spring-ai-pdf-document-reader
 
 ### 3.3 核心能力对比
 
-| 能力 | Spring AI 1.1.7 | Spring AI 2.0-RC1 | LangChain4j 1.13 | Spring AI Alibaba | LangGraph4j |
-|------|----------------|-------------------|-----------------|-------------------|-------------|
-| **Tool/Function Calling** | ⚠️ 基础 (@Tool) | ✅ ToolCallingAdvisor | ✅ 原生 @Tool | ✅ Agent Framework | ❌ 需配合 LLM 框架 |
-| **多步 Agent 循环** | ❌ 需手动实现 | ❌ 需手动实现 | ✅ Agent + Chain | ✅ Agent Skills | ✅ StateGraph |
-| **状态管理** | ❌ | ❌ | ✅ Memory | ✅ Context | ✅ Checkpointer |
-| **Supervisor-Worker** | ❌ | ❌ | ✅ 可组合 | ✅ 内置 | ✅ 可组合 |
-| **MCP 协议** | ❌ 1.x | ✅ 原生 | ✅ 实验 | ✅ | ❌ |
-| **Spring 集成** | ✅ 原生 | ✅ 原生 | ⚠️ Starter | ✅ 原生 | ❌ 独立 |
-| **DashScope 支持** | ✅ | ✅ | ⚠️ 实验 | ✅ 深度集成 | ❌ |
-| **Agent 可观测性** | ✅ Actuator | ✅ Actuator | ⚠️ 手动 | ✅ 内置 | ❌ |
-| **生产稳定性** | ✅ 成熟 | ⚠️ RC | ⚠️ 部分实验 | ✅ 成熟 | ⚠️ Beta |
-| **学习曲线** | 低 | 低 | 中 | 中 | 高 |
+| 能力 | Spring AI 1.1.7 | Spring AI Alibaba | AgentScope-Java | LangChain4j | LangGraph4j |
+|------|:--------------:|:-----------------:|:--------------:|:-----------:|:-----------:|
+| **Tool/Function Calling** | ⚠️ 基础 (@Tool) | ✅ Agent Framework | ✅ 原生 ReAct | ✅ 原生 @Tool | ❌ 需配合 |
+| **多步 Agent 循环** | ❌ 需手动 | ✅ Agent Skills | ✅ 内置 ReAct | ✅ Agent + Chain | ✅ StateGraph |
+| **自主推理(ReAct)** | ❌ | ⚠️ 部分 | ✅ **原生核心** | ✅ 支持 | ❌ 需配合 |
+| **状态管理** | ❌ | ✅ Context | ✅ **完整(ReMe)** | ✅ Memory | ✅ Checkpointer |
+| **Supervisor-Worker** | ❌ | ✅ 内置 | ✅ **SubAgent+Spawn** | ✅ 可组合 | ✅ 可组合 |
+| **安全沙箱** | ❌ | ⚠️ Sandbox | ✅ **内置(gVisor/Kata)** | ❌ 无 | ❌ 无 |
+| **MCP 协议** | ❌ 1.x | ✅ | ✅ | ✅ 实验 | ❌ |
+| **Spring 集成** | ✅ **原生** | ✅ **原生** | ⚠️ 独立运行 | ⚠️ Starter | ❌ 独立 |
+| **DashScope 支持** | ✅ | ✅ **深度集成** | ✅ 集成 | ⚠️ 实验 | ❌ |
+| **多租户隔离** | ❌ | ⚠️ | ✅ **内置(v2.0)** | ❌ | ❌ |
+| **Agent 可观测性** | ✅ Actuator | ✅ 内置 | ✅ Studio + OTel | ⚠️ 手动 | ❌ |
+| **生产稳定性** | ✅ 成熟 | ✅ 成熟 | ⚠️ 快速演进 | ⚠️ 部分实验 | ⚠️ Beta |
+| **学习曲线** | 低 | 中 | 中高 | 中 | 高 |
 
 ### 3.4 关键特性详解
 
@@ -322,65 +326,174 @@ graph.setFinishPoint("generate");
 
 **适用场景**: 需要复杂状态管理的工作流，但本项目已有的 Pipeline 模式已部分覆盖此能力。
 
-### 3.5 综合评分
+#### 3.4.6 AgentScope-Java — 自主智能体引擎
 
-| 维度 | 权重 | Spring AI 1.x | Spring AI Alibaba | LangChain4j | LangGraph4j |
-|------|------|:--------------:|:-----------------:|:-----------:|:-----------:|
-| 与本项目兼容性 | 30% | **10/10** | **10/10** | 4/10 | 3/10 |
-| Agent 原生能力 | 25% | 4/10 | **8/10** | **8/10** | 7/10 |
-| 生产稳定性 | 20% | **9/10** | **8/10** | 6/10 | 5/10 |
-| Spring 集成 | 10% | **10/10** | **10/10** | 6/10 | 4/10 |
-| DashScope 支持 | 10% | 7/10 | **10/10** | 5/10 | 3/10 |
-| 学习成本 | 5% | **9/10** | 7/10 | 6/10 | 5/10 |
-| **加权总分** | **100%** | **7.8** | **8.7** | 5.9 | 4.5 |
+AgentScope-Java 由 **阿里巴巴通义实验室** 开发，是国内首个面向 Java 生态的企业级多智能体运行时。与 Spring AI Alibaba（同一家公司）定位互补：前者专注 **自主推理 Agent**，后者专注 **Graph 工作流编排**。
+
+**核心架构**:
+
+```
+┌─────────────────────────────────────┐
+│          Agent 层                    │
+│  ReActAgent / HarnessAgent         │
+├─────────────────────────────────────┤
+│          编排层                      │
+│  SubAgent + Spawn / MsgHub         │
+├─────────────────────────────────────┤
+│        核心服务层                    │
+│  模型服务 / Toolkit / 记忆(ReMe)    │
+├─────────────────────────────────────┤
+│        基础设施层                    │
+│  安全沙箱(gVisor) / 分布式 / OTel   │
+└─────────────────────────────────────┘
+```
+
+**自研 Agent 循环 vs 框架对比**:
+
+| 维度 | 自研（基于 @Tool） | AgentScope-Java |
+|------|:----------------:|:---------------:|
+| 自主推理 | 需手动实现 ReAct 循环 | **内置** ReAct 引擎（Mono 响应式链） |
+| 流式推理 | 需额外实现 | **原生** Flux 流式 Token |
+| 错误恢复 | 需手动处理 | **自修正** Parser（格式错误自动重试） |
+| 状态管理 | 自研 AgentState | **完整** ReMe 记忆方案 |
+| 子 Agent | 不支持 | SubAgent + spawn 动态编排 |
+| 安全沙箱 | ❌ | ✅ gVisor/Kata 容器隔离 |
+| 可观测性 | 自研轨迹持久化 | **内置** OpenTelemetry + Studio |
+| 与现有项目集成 | 直接导入 Spring | 独立配置 / Spring 集成 |
+
+```java
+// AgentScope-Java ReActAgent 示例
+ReActAgent agent = ReActAgent.builder()
+    .name("KnowledgeAssistant")
+    .model(DashScopeChatModel.builder()
+        .apiKey(System.getenv("DASHSCOPE_API_KEY"))
+        .modelName("qwen-max")
+        .build())
+    .tools(new VectorSearchTool(), new BM25SearchTool())
+    .maxSteps(10)          // 自主决策步数上限
+    .build();
+
+// 调用 Agent（响应式，支持流式）
+Msg response = agent.call(
+    Msg.builder().textContent("比较 Spring Boot 和 Quarkus").build()
+).block();
+```
+
+**关键优势**:
+1. **原生 ReAct 引擎**：内置完整的推理→行动→观察循环，无需自研
+2. **安全沙箱**：唯一内置容器级工具隔离的 Java Agent 框架
+3. **SubAgent 动态编排**：Agent 可在运行时动态 spawn 子 Agent 完成子任务
+4. **ReMe 记忆方案**：完整的长短期记忆 + BPE 压缩（减少 75% 存储成本）
+
+**主要风险**:
+1. 版本迭代快（从 1.0 到 2.0-RC 仅半年），API 不稳定
+2. Spring 集成度不如 Spring AI Alibaba（需额外配置）
+3. 文档不完备，部分能力需看源码
+4. 和 Spring AI Alibaba 同属阿里，两者关系需厘清（互补而非替代）
+
+### 3.5 综合评分（含 AgentScope-Java）
+
+| 维度 | 权重 | Spring AI 1.x | Spring AI Alibaba | **AgentScope-Java** | LangChain4j | LangGraph4j |
+|------|:----:|:------------:|:-----------------:|:------------------:|:-----------:|:-----------:|
+| **与本项目兼容性** | 25% | **10/10** | **10/10** | 6/10 | 4/10 | 3/10 |
+| **Agent 原生能力** | 25% | 4/10 | 7/10 | **9/10** | **8/10** | 7/10 |
+| **生产稳定性** | 15% | **9/10** | **8/10** | 6/10 | 6/10 | 5/10 |
+| **Spring 集成** | 10% | **10/10** | **10/10** | 6/10 | 6/10 | 4/10 |
+| **DashScope 支持** | 10% | 7/10 | **10/10** | 8/10 | 5/10 | 3/10 |
+| **安全/企业特性** | 10% | 5/10 | 6/10 | **9/10** | 4/10 | 5/10 |
+| **学习成本** | 5% | **9/10** | 7/10 | 6/10 | 6/10 | 5/10 |
+| **加权总分** | **100%** | **7.5** | **8.4** | **7.3** | 5.8 | 4.6 |
 
 ---
 
 ## 4. 框架选型推荐
 
-### 4.1 推荐方案：Spring AI Alibaba（主框架）+ 自研 Agent 循环
+### 4.1 评分解读
 
-```mermaid
-graph TB
-    subgraph "推荐技术栈"
-        A[Spring Boot 3.5 已有] --> B[Spring AI 1.1.7 已有]
-        B --> C[Spring AI Alibaba 1.1.2.3 已有]
-        C --> D[Agent Framework: ReactAgent / RoutingAgent / LoopAgent]
-        C --> E[Graph Core: 状态管理 + Human-in-the-Loop]
-        B --> F[现有组件包装为 @AgentSkill]
-        D --> G[自研: SufficientContextAgent]
-        D --> H[自研: Self-Reflection + Repair]
-        F --> I[自研: ToolRegistry (基于 @AgentSkill)]
-    end
+| 框架 | 加权总分 | 核心优势 | 核心风险 |
+|------|:-------:|---------|---------|
+| **Spring AI Alibaba** | **8.4** | 兼容性最佳 + Spring 原生 + DashScope 深度集成 | Agent 自主推理能力不如 AgentScope |
+| **AgentScope-Java** | **7.3** | Agent 能力最强 + 安全沙箱 + 多租户 | 兼容性低 + 版本不稳定 + 文档不足 |
+| Spring AI 1.x | 7.5 | 最稳定 + Spring 原生 vs 无 Agent 能力 | 无法满足 Agentic RAG 需求 |
+| LangChain4j | 5.8 | 能力全面 vs 框架冲突 + 集成成本高 | 与现有 Spring AI 冲突 |
+| LangGraph4j | 4.6 | 状态图强 vs 不兼容 Spring | 需配合其他框架使用 |
+
+### 4.2 推荐方案：Spring AI Alibaba（主）+ AgentScope-Java（Agent 引擎）
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                  Spring Boot 3.5 应用                       │
+├────────────────────────────────────────────────────────────┤
+│  Spring AI Alibaba 1.1.2.3（编排 + 基础设施层）             │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │  • @AgentSkill 工具定义（包装现有检索组件为 Agent 工具）│   │
+│  │  • Graph Core 工作流编排（确定性流程的兜底）          │   │
+│  │  • DashScope 通义千问 / Embedding / Rerank 深度集成  │   │
+│  │  • MCP Gateway / Nacos / Spring Security/Actuator   │   │
+│  └────────────────────────────────────────────────────┘   │
+│                                                           │
+│  AgentScope-Java（Agent 推理层）                            │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │  • ReActAgent 引擎（内置推理→行动→观察循环）         │   │
+│  │  • SubAgent + spawn 动态子任务编排                  │   │
+│  │  • 安全沙箱（gVisor）隔离工具执行                     │   │
+│  │  • ReMe 记忆方案 + OpenTelemetry 可观测性            │   │
+│  └────────────────────────────────────────────────────┘   │
+├────────────────────────────────────────────────────────────┤
+│  现有基础设施（VectorSearchTool / BM25Tool / ExternalSearch）│
+└────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 推荐理由
+### 4.3 推荐理由
+
+**为什么选 Spring AI Alibaba 作为主体**（兼容性优先）:
 
 | 维度 | 说明 |
 |------|------|
-| **零新增依赖** | Spring AI Alibaba 1.1.2.3 已是项目现有依赖 |
-| **深度 DashScope 集成** | 通义千问模型、Embedding 均已在项目中使用 |
-| **内置 Agent 三层架构** | Agent Skills + Supervisor + Graph Core 能满足我们 80% 的 Agent 需求 |
-| **兼容性** | 与 Spring Boot 3.5 完全兼容，无版本冲突 |
-| **迁移路径** | 当前使用的 Spring AI 1.1.7 将于 2026.06 EOL，Spring AI Alibaba 后续可升级到 2.0 适配版 |
-| **社区活跃** | 9.9k+ GitHub Stars，236 贡献者，阿里云官方维护 |
+| **零新增依赖** | 已是项目现有依赖，无版本冲突风险 |
+| **Spring 原生集成** | Actuator、Security、Micrometer 开箱即用 |
+| **DashScope 深度集成** | Qwen-Max / text-embedding-v4 已在生产使用 |
+| **工具定义简洁** | @AgentSkill 注解与 Spring Bean 无缝集成 |
+| **迁移路径清晰** | 兼容 Spring Boot 3.5，后续可升级 2.0 适配版 |
 
-### 4.3 引入 LangGraph4j 的时机
+**为什么叠加 AgentScope-Java**（Agent 能力补全）:
 
-如果后续需要更复杂的状态管理（如断点恢复、审计级轨迹回放），可以考虑在 Spring AI Alibaba 的 Graph Core 之上叠加 LangGraph4j。但第一阶段不建议引入。
+| 维度 | 说明 |
+|------|------|
+| **避免自研 Agent 循环** | 自研 ReAct 循环（§8.1 参考代码约 200 行）虽可行，但 AgentScope 提供更成熟的反应式引擎（Mono 链 + 流式 + 自修正 Parser） |
+| **安全沙箱** | 工具执行安全隔离是 Agentic RAG 的关键需求（防止 prompt injection 越权） |
+| **SubAgent 动态编排** | 复杂任务可动态 spawn 子 Agent，比固定 Supervisor 更灵活 |
+| **ReMe 记忆方案** | 内置记忆压缩（BPE 75% 缩减），比自研方案更优 |
 
-### 4.4 不使用 LangChain4j 的理由
+**两者关系**:
+
+> Spring AI Alibaba 与 AgentScope-Java 同属阿里巴巴，定位**互补**而非替代：
+> - Spring AI Alibaba = **确定性编排 + 基础设施**（Graph、Security、Monitoring）
+> - AgentScope-Java = **自主推理 + 安全执行**（ReAct、Sandbox、SubAgent）
+> - 两者共享 DashScope 模型底座，无兼容性问题
+
+### 4.4 不选择 LangChain4j 的理由
 
 | 原因 | 说明 |
 |------|------|
-| **框架冲突** | LangChain4j 与 Spring AI 的模型抽象层不兼容，同时引入会导致两套 ChatModel/EmbeddingModel |
-| **DashScope 支持弱** | 阿里云通义模型在 LangChain4j 中为实验性支持 |
-| **导入成本** | 新增依赖链长、版本兼容性需要大量测试 |
-| **Spring 集成浅** | 无 Actuator、Security 等原生集成 |
+| **框架冲突** | 模型抽象层不兼容，同时引入需两套 ChatModel/EmbeddingModel |
+| **DashScope 支持弱** | 通义模型为实验性支持，功能不完整 |
+| **导入成本高** | 依赖链长，版本兼容性需要大量测试 |
+| **Spring 集成浅** | 无 Actuator/Security 原生集成，需手动适配 |
+| **安全沙箱缺失** | 无内置工具隔离机制 |
+
+### 4.5 风险与缓解
+
+| 风险 | 概率 | 影响 | 缓解措施 |
+|------|:----:|:----:|---------|
+| AgentScope-Java 版本 API 变动 | 高 | 中 | 锁定 1.0.11 稳定版，第一阶段只使用 ReActAgent 核心 API |
+| Spring AI Alibaba + AgentScope 版本兼容性 | 中 | 高 | 先 PoC 验证集成可行性，再commit |
+| 两套框架增加维护成本 | 中 | 中 | 明确职责边界：Spring AI Alibaba 管编排，AgentScope 管推理 |
+| AgentScope 文档不足 | 中 | 低 | 核心 ReActAgent 文档已完善，边缘功能看源码 |
 
 ---
 
-## 5. 基于 Spring AI Alibaba 的 Agentic RAG 架构
+## 5. 基于 Spring AI Alibaba + AgentScope-Java 的 Agentic RAG 架构
 
 ### 5.1 架构分层
 
@@ -392,39 +505,53 @@ graph TB
                          │
 ┌────────────────────────▼─────────────────────────────────┐
 │             Routing Layer (KnowledgeQAService)             │
-│  规则/LLM 分类 → 选择 Workflow Agentic Hybrid             │
+│  规则/LLM 分类 → 选择 Workflow / Agentic / Hybrid        │
 └──────┬─────────────────────────────────┬─────────────────┘
        │                                 │
        ▼                                 ▼
 ┌──────────────┐          ┌──────────────────────────────┐
-│ Workflow RAG │          │      Agentic RAG (新增)        │
+│ Workflow RAG │          │    Agentic RAG (新增)          │
 │ (保留, 降级)  │          │                              │
 │              │          │  ┌────────────────────────┐  │
-│ BasicRagFlow │          │  │ AgentOrchestrator      │  │
-│ Advanced     │          │  │ ReactAgent / LoopAgent │  │
-│              │          │  └────────────────────────┘  │
-└──────────────┘          │  ┌────────────────────────┐  │
-                          │  │ ToolRegistry            │  │
-                          │  │ @AgentSkill 工具集      │  │
+│ BasicRagFlow │          │  │  AgentScope-Java        │  │
+│ Advanced     │          │  │  ┌────────────────┐    │  │
+│              │          │  │  │ ReActAgent     │    │  │
+│              │          │  │  │ (推理→行动→观察) │    │  │
+└──────────────┘          │  │  │ SubAgent+Spawn │    │  │
+                          │  │  └────────────────┘    │  │
                           │  └────────────────────────┘  │
                           │  ┌────────────────────────┐  │
-                          │  │ Quality Pipeline       │  │
+                          │  │ Spring AI Alibaba        │  │
+                          │  │  ┌────────────────┐    │  │
+                          │  │  │ @AgentSkill     │    │  │
+                          │  │  │ 工具定义 + 注册  │    │  │
+                          │  │  │ Graph Core 编排  │    │  │
+                          │  │  │ DashScope 集成   │    │  │
+                          │  │ └────────────────┘    │  │
+                          │  └────────────────────────┘  │
+                          │  ┌────────────────────────┐  │
+                          │  │ Quality Pipeline(自研)  │  │
                           │  │ ContextAgent           │  │
                           │  │ Reflection + Repair    │  │
+                          │  │ LLM Judge              │  │
                           │  └────────────────────────┘  │
                           └──────────────────────────────┘
 ```
 
-### 5.2 Agent 工具清单（基于 @AgentSkill）
+### 5.2 Agent 工具清单
 
-| 工具名 | 实现 | 入参 | 说明 |
+工具通过 **Spring AI Alibaba 的 @AgentSkill** 定义（Spring Bean 原生注入），由 **AgentScope-Java 的 ReActAgent** 调用执行。
+
+| 工具名 | 框架 | 实现 | 入参 |
 |--------|------|------|------|
-| `vector_search` | 包装 HybirdContentRetriever | query, top_k, source | 向量 + BM25 混合检索 |
-| `bm25_search` | 包装 Bm25Indexer | query, top_k | 关键词精确搜索 |
-| `external_search` | 包装 ExternalSearchService | query, top_k | 互联网搜索（Tavily/Bing） |
-| `memory_query` | 包装 ShortTermMemoryManager + LongTermMemoryManager | query | 用户记忆查询 |
-| `sql_query` | Text-to-SQL（新增） | query, table_hint | 结构化数据查询 |
-| `hybrid_search` | 同时调 vector + bm25 并合并（快捷工具） | query, top_k | 一键全检索 |
+| `vector_search` | @AgentSkill | 包装 HybirdContentRetriever | query, top_k, source |
+| `bm25_search` | @AgentSkill | 包装 Bm25Indexer | query, top_k |
+| `external_search` | @AgentSkill | 包装 ExternalSearchService | query, top_k |
+| `memory_query` | @AgentSkill | 包装 ShortTermMemoryManager + LongTermMemoryManager | query |
+| `sql_query` | @AgentSkill | Text-to-SQL（新增） | query, table_hint |
+| `hybrid_search` | @AgentSkill | 同时调 vector + bm25 并合并（快捷工具） | query, top_k |
+
+工具由 Spring AI Alibaba 管理注册声明周期，AgentScope 的 ReActAgent 通过 ToolRegistry 获取工具描述并调用。
 
 ### 5.3 Agent 执行流程
 
@@ -442,7 +569,7 @@ User Query
 │ AgentOrchestrator.start()                                         │
 │                                                                   │
 │  ┌──────────────────────────────────────────────────────────┐    │
-│  │ ReactAgent 主循环 (Spring AI Alibaba ReactAgent)          │    │
+│  │ ReactAgent 主循环 (AgentScope-Java ReActAgent)            │    │
 │  │                                                          │    │
 │  │  step 1: 分析问题 → 规划方案                               │    │
 │  │  step 2: 调用工具 (并行/串行)                              │    │
@@ -538,14 +665,17 @@ public class KnowledgeQAService {
 
 | 决策 ID | 决策项 | 结论 | 理由 |
 |---------|--------|------|------|
-| ADR-001 | Agent 框架 | **Spring AI Alibaba** 1.1.2.3（现有依赖） | 零新增依赖，兼容性最佳，内置 Agent 三层架构 |
-| ADR-002 | Workflow 保留策略 | **并行共存 → 渐进替代** | 风险可控，可灰度 |
-| ADR-003 | 路由策略 | **规则 + LLM 分类** | 简单查询零额外成本，复杂查询准确分类 |
-| ADR-004 | Tool 粒度 | **混合粒度** | Agent 可精确控制也可快捷调用 |
-| ADR-005 | 循环上限 | 主循环 max 5，Context 重检索 max 3，Repair max 2 | 防止无限循环 |
-| ADR-006 | Agent 循环实现 | **自研 ReactAgent 循环**（基于 Spring AI @Tool + ChatClient） | Spring AI Alibaba 的 ReactAgent 还需验证；先自研确保可控 |
-| ADR-007 | 状态管理 | **自研 AgentState + 轨迹 JSON 持久化** | 避免引入额外框架，满足审计需求即可 |
-| ADR-008 | 质量保障 | **ContextAgent + Reflection + Repair + Judge 四阶段** | 分层保障，各有侧重 |
+| ADR-001 | 主框架 | **Spring AI Alibaba** 1.1.2.3 | Spring 原生兼容，DashScope 深度集成，现有依赖 |
+| ADR-002 | Agent 引擎 | **AgentScope-Java** 1.0.11（新增依赖） | 内置 ReAct 引擎 + 安全沙箱 + SubAgent，避免自研循环 |
+| ADR-003 | Workflow 保留策略 | **并行共存 → 渐进替代** | 风险可控，可灰度 |
+| ADR-004 | 路由策略 | **规则 + LLM 分类** | 简单查询零额外成本，复杂查询准确分类 |
+| ADR-005 | Tool 粒度 | **混合粒度** | Agent 可精确控制也可快捷调用 |
+| ADR-006 | 循环上限 | 主循环 max 5，Context 重检索 max 3，Repair max 2 | 防止无限循环 |
+| ADR-007 | Agent 循环实现 | **AgentScope-Java ReActAgent**（替代自研） | 成熟的 ReAct 引擎 + 流式 + 自修正 Parser |
+| ADR-008 | 状态管理 | **AgentScope ReMe 记忆 + 轨迹 JSON 持久化** | ReMe 提供 BPE 压缩（75% 存储缩减） |
+| ADR-009 | 质量保障 | **ContextAgent + Reflection + Repair + Judge 四阶段**（自研） | 分层保障，各有侧重 |
+| ADR-010 | 安全沙箱 | **AgentScope 内置沙箱** | 工具隔离执行，防 Prompt Injection |
+| ADR-011 | 工具注册 | **Spring AI Alibaba @AgentSkill** | Spring Bean 原生注入，与现有代码一致 |
 
 ### 6.2 功能需求优先级（修订版）
 
@@ -608,25 +738,33 @@ Phase 1 (P0, ~14 人日)         Phase 2 (P0, ~10 人日)        Phase 3 (P1+P2,
 
 | 序号 | 决策项 | 建议 | 请确认 |
 |------|--------|------|--------|
-| 1 | **框架选型** | 使用 Spring AI Alibaba 1.1.2.3（已有），不引入 LangChain4j | [ ] |
-| 2 | **Workflow 保留** | 先并行共存，稳定后淘汰 | [ ] |
-| 3 | **路由策略** | 规则 + LLM 分类，SIMPLE 走 Workflow | [ ] |
-| 4 | **Tool 粒度** | 混合粒度（独立工具 + 快捷工具） | [ ] |
-| 5 | **循环上限** | 主循环 5 次，重检索 3 次，修复 2 次 | [ ] |
-| 6 | **ReactAgent 实现** | 基于 Spring AI @Tool + ChatClient 自研循环 | [ ] |
-| 7 | **第一阶段范围** | P0 全部实现（~14 人日） | [ ] |
-| 8 | **第二阶段范围** | P0 质量保障（~10 人日） | [ ] |
+| 1 | **主框架** | **Spring AI Alibaba** 1.1.2.3（已有依赖） | [ ] |
+| 2 | **Agent 引擎** | **AgentScope-Java** 1.0.11（新增依赖） | [ ] |
+| 3 | **Workflow 保留** | 先并行共存，稳定后淘汰 | [ ] |
+| 4 | **路由策略** | 规则 + LLM 分类，SIMPLE 走 Workflow | [ ] |
+| 5 | **Tool 粒度** | 混合粒度（独立工具 + 快捷工具） | [ ] |
+| 6 | **循环上限** | 主循环 5 次，重检索 3 次，修复 2 次 | [ ] |
+| 7 | **质量保障** | ContextAgent + Reflection + Repair + Judge 四阶段自研 | [ ] |
+| 8 | **安全沙箱** | AgentScope 内置沙箱隔离工具执行 | [ ] |
+| 9 | **第一阶段范围** | P0 全部实现（~14 人日） | [ ] |
+| 10 | **第二阶段范围** | P0 质量保障（~10 人日） | [ ] |
 
 ### 7.2 待讨论的技术问题
 
-1. **Q: Spring AI Alibaba 的 ReactAgent 是否可直接复用？**
-   - A: 需要验证。目前 Spring AI Alibaba 1.1.2.3 的 ReactAgent 文档较少，可能需要自研循环引擎。第一阶段先自研确保可控。
+1. **Q: AgentScope-Java 与 Spring AI Alibaba 的集成可行性？**
+   - A: 两者同属阿里巴巴通义实验室，共享 DashScope 模型底座，理论上兼容。需先做 PoC 验证（预计 2 人日）确认：AgentScope 能否直接调用 Spring AI Alibaba 的 ChatClient / 是否需要额外适配层。
 
-2. **Q: 轨迹数据量级评估？**
+2. **Q: 引入 AgentScope-Java 新增的依赖链？**
+   - A: 需评估 `agentscope-java` 的传递依赖是否与现有 Spring Boot 3.5 / Milvus / Resilience4j 冲突。建议 PoC 阶段使用 `mvn dependency:tree` 验证。
+
+3. **Q: AgentScope 的 ReActAgent 是否支持工具调用和上下文记忆？**
+   - A: 官方文档确认支持 ReAct 推理 + Tool Calling + MsgHub 多 Agent 通信。但具体的 Tool 注册方式、记忆注入方式需 PoC 验证。
+
+4. **Q: 轨迹数据量级评估？**
    - A: 按日均 10 万次 Agent 调用、每次轨迹 5KB 估算 → 日增 500MB，30 天约 15GB。MySQL JSON 存储 + 定时归档可承受。
 
-3. **Q: 现有 CRAG 是否保留？**
-   - A: CRAG 的 `RetrievalEvaluator` 可复用到 Self-Reflection 阶段（评估检索质量）。CRAG 的 `ComplexRAGHandler`（重查询/外部搜索）可拆为 Agent 工具。
+5. **Q: 现有 CRAG 是否保留？**
+   - A: CRAG 的 `RetrievalEvaluator` 可复用到 Self-Reflection 阶段。`ComplexRAGHandler` 可拆为 Agent 工具。
 
 ---
 

@@ -35,5 +35,17 @@ build/
 ### VS Code ###
 .vscode/
 
+### Agentic RAG workspace runtime data ###
+workspace/*/agents/
+workspace/*/memory/
+workspace/*/sessions/
+
+### Claude Code local config ###
+.claude/settings.local.json
+.claude/worktrees/
+
+### Misc artifacts ###
+nul
+
 ### Mac OS ###
 .DS_Store

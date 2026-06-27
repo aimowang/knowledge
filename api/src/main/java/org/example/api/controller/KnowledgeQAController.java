@@ -8,9 +8,12 @@ import org.example.core.cache.CacheService;
 import org.example.core.evaluation.EvaluationManager;
 import org.example.core.memory.ShortTermMemoryManager;
 import org.example.core.service.KnowledgeQAService;
+import org.example.model.AgenticAskRequest;
+import org.example.model.AgenticAskResponse;
 import org.example.model.AskRequest;
 import org.example.model.RagAnswer;
 import org.example.model.RagEvaluation;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -125,8 +128,51 @@ public class KnowledgeQAController {
     @GetMapping("/evaluations/low-quality")
     @Operation(summary = "低质量评估", description = "获取低于阈值的评估记录，用于优化 RAG 流程")
     public List<RagEvaluation> getLowQualityEvaluations(
-            @Parameter(description = "评分阈值，默认 0.6", example = "0.6") 
+            @Parameter(description = "评分阈值，默认 0.6", example = "0.6")
             @RequestParam(defaultValue = "0.6") double threshold) {
         return evaluationManager.getLowQualityEvaluations(threshold);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // Agentic RAG 端点
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * Agentic RAG 问答 — 基于 AgentScope HarnessAgent 的自主推理问答。
+     */
+    @PostMapping("/ask/agent")
+    @Operation(summary = "Agentic RAG 问答", description = "基于 Agent 的自主推理问答，支持多步推理和质量检查")
+    public ResponseEntity<AgenticAskResponse> askWithAgent(
+            @RequestBody AgenticAskRequest request) {
+        if (request.getQuestion() == null || request.getQuestion().isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        try {
+            AgenticAskResponse response = qaService.askWithAgentic(request);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Agentic 问答失败: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(
+                AgenticAskResponse.builder()
+                    .answer("抱歉，Agent 处理失败: " + e.getMessage())
+                    .agenticMode(true)
+                    .build()
+            );
+        }
+    }
+
+    /**
+     * 查询 Agent 执行轨迹。
+     */
+    @GetMapping("/trajectory/{trajectoryId}")
+    @Operation(summary = "查询 Agent 轨迹", description = "获取 Agent 执行的完整决策路径")
+    public ResponseEntity<Map<String, Object>> getTrajectory(
+            @PathVariable String trajectoryId) {
+        // Phase 3 完整实现，当前返回简单的轨迹查找结果
+        return ResponseEntity.ok(Map.of(
+            "trajectoryId", trajectoryId,
+            "status", "AVAILABLE",
+            "message", "轨迹详情将在 Phase 3 中完整实现"
+        ));
     }
 }
