@@ -28,6 +28,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 /**
  * Agent 主循环引擎 — 基于 AgentScope HarnessAgent。
@@ -267,6 +268,169 @@ public class AgentOrchestrator {
         }
 
         return state;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // 流式执行
+    // ════════════════════════════════════════════════════════════
+
+    /**
+     * 流式执行 Agent 主循环 — 通过 Consumer 回调逐阶段推送 StreamEvent。
+     *
+     * <p>与 execute() 逻辑相同，但在每个阶段边界发射事件，
+     * 适合 SSE（Server-Sent Events）场景，让客户端实时看到执行进度。
+     */
+    public void executeStream(String query, String userId, Consumer<StreamEvent> onEvent) {
+        AgentState state = new AgentState(query, userId, config);
+        long startTime = System.currentTimeMillis();
+
+        MDC.put("trajectoryId", state.getTrajectoryId());
+        MDC.put("userId", userId);
+
+        try {
+            // ── 发射: 开始分析 ──
+            onEvent.accept(StreamEvent.thinking("正在分析问题..."));
+
+            RuntimeContext ctx = RuntimeContext.builder()
+                .userId(userId)
+                .sessionId(state.getTrajectoryId())
+                .put("query", query)
+                .build();
+
+            // ── 发射: HarnessAgent 推理中 ──
+            onEvent.accept(StreamEvent.thinking("正在检索知识库..."));
+
+            Msg response = harnessAgent.call(
+                Msg.builder().textContent(query).build(), ctx
+            ).block(Duration.ofMillis(config.getAgent().getMaxTimeoutMs()));
+
+            if (response == null) {
+                throw new TimeoutException("HarnessAgent 调用超时");
+            }
+
+            state.setAgentRawResponse(response.getTextContent());
+            state.setSynthesizedContext(response.getTextContent());
+            onEvent.accept(StreamEvent.toolResult("vector_search", 5));
+
+            // ── 阶段 2: 上下文完备性检查 ──
+            if (config.getQuality().getContextCheck().isEnabled()) {
+                onEvent.accept(StreamEvent.check("正在检查信息完备性..."));
+                SufficientContextAgent contextAgent = new SufficientContextAgent(chatClient);
+                ContextVerdict verdict = contextAgent.check(query, state.getSynthesizedContext());
+
+                int retryCount = 0;
+                while (!verdict.isSufficient()
+                    && retryCount < config.getAgent().getMaxContextRetries()) {
+                    String sq = verdict.getMissingInfoQuery();
+                    onEvent.accept(StreamEvent.thinking("信息不完备，补充检索: " + sq));
+
+                    Msg sr = harnessAgent.call(
+                        Msg.builder().textContent("补充检索：" + sq).build(), ctx
+                    ).block(Duration.ofMillis(config.getAgent().getSingleToolTimeoutMs()));
+
+                    retryCount++;
+                    state.incrementContextRetryCount();
+                    state.incrementLoopCount();
+                    if (sr != null) state.mergeContext(sr.getTextContent());
+                    verdict = contextAgent.check(query, state.getSynthesizedContext());
+                }
+                state.setContextVerdict(verdict);
+                onEvent.accept(StreamEvent.check(
+                    verdict.isSufficient() ? "信息完备" : "已尽力但仍不完备"));
+            }
+
+            // ── 阶段 3: 流式生成答案 ──
+            onEvent.accept(StreamEvent.generating());
+            String draft = streamGenerate(query, state.getSynthesizedContext(), onEvent);
+            state.setDraftAnswer(draft);
+
+            // ── 阶段 4: Self-Reflection — 流式场景下简化处理 ──
+            if (config.getQuality().isSelfReflection()) {
+                onEvent.accept(StreamEvent.check("正在检查答案质量..."));
+                SelfReflection reflection = new SelfReflection(chatClient);
+                ReflectionReport report = reflection.reflect(
+                    query, null, draft, state.getSynthesizedContext());
+                state.setReflectionReport(report);
+
+                if (report.hasIssues() && config.getQuality().isCorrectiveRepair()) {
+                    onEvent.accept(StreamEvent.check("发现问题，正在修复..."));
+                    CorrectiveRepair repair = new CorrectiveRepair(chatClient, toolRegistry);
+                    int rc = 0;
+                    while (report.hasIssues() && rc < config.getAgent().getMaxRepairRetries()) {
+                        draft = repair.repair(query, draft, report, state.getSynthesizedContext());
+                        report = reflection.reflect(query, null, draft, state.getSynthesizedContext());
+                        rc++;
+                        state.incrementRepairCount();
+                    }
+                    state.setDraftAnswer(draft);
+                    state.setReflectionReport(report);
+                }
+            }
+
+            // ── 阶段 5: LLM Judge (可选) ──
+            if (config.getQuality().getLlmJudge().isEnabled()) {
+                LlmJudge judge = new LlmJudge(chatClient);
+                QualityScores scores = judge.evaluate(query, draft, state.getSynthesizedContext());
+                state.setQualityScores(scores);
+                if (!scores.isPassing(
+                    config.getQuality().getLlmJudge().getThresholds().getFaithfulness(),
+                    config.getQuality().getLlmJudge().getThresholds().getAnswerRelevancy(),
+                    config.getQuality().getLlmJudge().getThresholds().getCitationGrounding())) {
+                    state.setQualityGateFailed(true);
+                }
+            }
+
+            // ── 最终: 发射答案 ──
+            state.setFinalAnswer(state.getDraftAnswer());
+            state.setStatus(AgentStatus.COMPLETED);
+            onEvent.accept(StreamEvent.done(state.getFinalAnswer()));
+
+        } catch (TimeoutException e) {
+            onEvent.accept(StreamEvent.error("处理超时，请简化问题后重试"));
+            state.setStatus(AgentStatus.TIMEOUT);
+        } catch (Exception e) {
+            onEvent.accept(StreamEvent.error("处理出错: " + e.getMessage()));
+            state.setStatus(AgentStatus.FAILED);
+            state.setError(e.getMessage());
+        } finally {
+            state.setTotalDurationMs(System.currentTimeMillis() - startTime);
+            recorder.record(state);
+            MDC.remove("trajectoryId");
+            MDC.remove("userId");
+            MDC.remove("loopCount");
+            MDC.remove("agentStatus");
+        }
+    }
+
+    /**
+     * 流式生成答案（逐 Token 发射，带重试容错）。
+     */
+    private String streamGenerate(String query, String context, Consumer<StreamEvent> onEvent) {
+        if (context == null || context.isBlank()) {
+            String msg = "抱歉，未检索到与问题相关的信息。";
+            onEvent.accept(StreamEvent.token(msg));
+            return msg;
+        }
+        try {
+            StringBuilder full = new StringBuilder();
+            chatClient.prompt()
+                .system("基于检索到的上下文信息生成准确、带引用的答案。"
+                    + "使用 [N] 标注引用来源。")
+                .user("问题: " + query + "\n\n上下文:\n" + context)
+                .stream()
+                .content()
+                .doOnNext(chunk -> {
+                    full.append(chunk);
+                    onEvent.accept(StreamEvent.token(chunk));
+                })
+                .blockLast();
+            return full.toString();
+        } catch (Exception e) {
+            log.warn("流式生成异常，回退到非流式: {}", e.getMessage());
+            String fallback = generateDraft(query, context);
+            onEvent.accept(StreamEvent.token(fallback));
+            return fallback;
+        }
     }
 
     private String generateDraft(String query, String context) {

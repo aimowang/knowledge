@@ -13,8 +13,11 @@ import org.example.model.AgenticAskResponse;
 import org.example.model.AskRequest;
 import org.example.model.RagAnswer;
 import org.example.model.RagEvaluation;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -32,13 +35,16 @@ public class KnowledgeQAController {
     private final EvaluationManager evaluationManager;
     private final ShortTermMemoryManager shortTermMemoryManager;
     private final CacheService cacheService;
+    private final ThreadPoolTaskExecutor ragRetrievalExecutor;
 
     public KnowledgeQAController(KnowledgeQAService qaService, EvaluationManager evaluationManager,
-                                  ShortTermMemoryManager shortTermMemoryManager, CacheService cacheService) {
+                                  ShortTermMemoryManager shortTermMemoryManager, CacheService cacheService,
+                                  ThreadPoolTaskExecutor ragRetrievalExecutor) {
         this.qaService = qaService;
         this.evaluationManager = evaluationManager;
         this.shortTermMemoryManager = shortTermMemoryManager;
         this.cacheService = cacheService;
+        this.ragRetrievalExecutor = ragRetrievalExecutor;
     }
 
     /**
@@ -168,11 +174,75 @@ public class KnowledgeQAController {
     @Operation(summary = "查询 Agent 轨迹", description = "获取 Agent 执行的完整决策路径")
     public ResponseEntity<Map<String, Object>> getTrajectory(
             @PathVariable String trajectoryId) {
-        // Phase 3 完整实现，当前返回简单的轨迹查找结果
         return ResponseEntity.ok(Map.of(
             "trajectoryId", trajectoryId,
             "status", "AVAILABLE",
             "message", "轨迹详情将在 Phase 3 中完整实现"
         ));
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // 流式 SSE 端点
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * Agentic RAG 流式问答（SSE）— 实时推送执行进度和答案 Token。
+     *
+     * <p>返回 {@code text/event-stream}，事件类型：
+     * <ul>
+     *   <li>{@code thinking} — Agent 正在思考/检索</li>
+     *   <li>{@code tool_call} — 调用工具</li>
+     *   <li>{@code check} — 质量检查</li>
+     *   <li>{@code generating} — 开始生成</li>
+     *   <li>{@code token} — 答案 Token（逐个推送）</li>
+     *   <li>{@code done} — 执行完成（含完整答案）</li>
+     *   <li>{@code error} — 执行出错</li>
+     * </ul>
+     */
+    @PostMapping("/ask/agent/stream")
+    @Operation(summary = "Agentic RAG 流式问答（SSE）",
+               description = "基于 Agent 的自主推理问答，通过 SSE 实时推送执行进度和答案 Token")
+    public SseEmitter askWithAgentStream(@RequestBody AgenticAskRequest request) {
+        // 校验
+        if (request.getQuestion() == null || request.getQuestion().isBlank()) {
+            SseEmitter emitter = new SseEmitter(0L);
+            try {
+                emitter.send(SseEmitter.event().name("error").data("question must not be blank"));
+            } catch (Exception ignored) {}
+            emitter.complete();
+            return emitter;
+        }
+
+        // 60 秒超时，连接断开时自动取消
+        SseEmitter emitter = new SseEmitter(60_000L);
+        emitter.onCompletion(() -> log.debug("SSE 连接完成"));
+        emitter.onTimeout(() -> log.debug("SSE 连接超时"));
+
+        // 异步执行（使用 ragRetrievalExecutor 线程池）
+        ragRetrievalExecutor.submit(() -> {
+            try {
+                qaService.askWithAgentStream(request, event -> {
+                    try {
+                        emitter.send(SseEmitter.event()
+                            .name(event.getType())
+                            .data(event.getContent()));
+                    } catch (java.io.IOException e) {
+                        // 客户端断开连接，停止执行
+                        log.debug("SSE 客户端断开，停止流式输出");
+                        throw new RuntimeException(e);
+                    }
+                });
+                emitter.complete();
+            } catch (Exception e) {
+                try {
+                    emitter.send(SseEmitter.event()
+                        .name("error")
+                        .data("流式处理失败: " + e.getMessage()));
+                } catch (Exception ignored) {}
+                emitter.completeWithError(e);
+            }
+        });
+
+        return emitter;
     }
 }

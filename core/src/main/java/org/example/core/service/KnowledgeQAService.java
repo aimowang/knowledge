@@ -8,6 +8,8 @@ import org.example.core.memory.MemoryExtractor;
 import org.example.core.memory.ShortTermMemoryManager;
 import org.example.core.rag.RagFlow;
 import org.example.core.rag.agentic.agent.AgentConfig;
+import org.example.core.rag.agentic.agent.AgentOrchestrator;
+import org.example.core.rag.agentic.agent.StreamEvent;
 import org.example.core.rag.agentic.router.QueryRouter;
 import org.example.core.rag.impl.AdvancedRagFlow;
 import org.example.core.retrieval.ContentRetriever;
@@ -37,12 +39,14 @@ public class KnowledgeQAService {
     private final EvaluationManager evaluationManager;
     private final QueryRouter queryRouter;
     private final AgentConfig agentConfig;
+    private final AgentOrchestrator agentOrchestrator;
 
     public KnowledgeQAService(ChatClient chatClient, List<ContentRetriever> retrievers,
                              List<RagFlow> ragFlows, ShortTermMemoryManager shortTermMemoryManager,
                              LongTermMemoryManager longTermMemoryManager, MemoryExtractor memoryExtractor,
                              RagEvaluator ragEvaluator, EvaluationManager evaluationManager,
-                             QueryRouter queryRouter, AgentConfig agentConfig) {
+                             QueryRouter queryRouter, AgentConfig agentConfig,
+                             AgentOrchestrator agentOrchestrator) {
         this.chatClient = chatClient;
         this.retrievers = retrievers;
         this.ragFlows = ragFlows;
@@ -53,6 +57,7 @@ public class KnowledgeQAService {
         this.evaluationManager = evaluationManager;
         this.queryRouter = queryRouter;
         this.agentConfig = agentConfig;
+        this.agentOrchestrator = agentOrchestrator;
     }
 
     /**
@@ -130,6 +135,37 @@ public class KnowledgeQAService {
             .build();
 
         return response;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // 流式 Agentic RAG
+    // ════════════════════════════════════════════════════════════
+
+    /**
+     * 流式 Agentic RAG 问答 — 通过 Consumer 回调推流 StreamEvent。
+     *
+     * @param request  问答请求
+     * @param onEvent  事件回调（在 ragRetrievalExecutor 线程中执行）
+     */
+    public void askWithAgentStream(AgenticAskRequest request,
+                                    java.util.function.Consumer<StreamEvent> onEvent) {
+        if (request.getQuestion() == null || request.getQuestion().isBlank()) {
+            onEvent.accept(StreamEvent.error("question must not be blank"));
+            return;
+        }
+
+        String userId = request.getUserId() != null ? request.getUserId() : "anonymous";
+        String question = request.getQuestion();
+
+        // 检查是否启用 Agentic 模式
+        if (agentConfig.getRouting().isForceWorkflow() || !agentConfig.isEnabled()) {
+            onEvent.accept(StreamEvent.thinking("Agentic 模式未启用，使用标准模式"));
+            onEvent.accept(StreamEvent.done("请使用 /api/qa/ask 接口"));
+            return;
+        }
+
+        // 委托给 AgentOrchestrator 的流式方法
+        agentOrchestrator.executeStream(question, userId, onEvent);
     }
 
     /**
