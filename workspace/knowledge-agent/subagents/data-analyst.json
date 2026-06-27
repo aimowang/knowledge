@@ -1,0 +1,9 @@
+{
+  "name": "data_analyst",
+  "description": "专门处理数据分析类问题，执行 SQL 查询和统计",
+  "model": "qwen-max",
+  "tools": ["sql_query"],
+  "workspace": "./workspace/subagents/data-analyst",
+  "maxSteps": 5,
+  "enabled": false
+}

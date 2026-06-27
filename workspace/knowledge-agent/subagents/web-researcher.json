@@ -1,0 +1,9 @@
+{
+  "name": "web_researcher",
+  "description": "互联网信息搜集与实时查询",
+  "model": "qwen-max",
+  "tools": ["external_search"],
+  "workspace": "./workspace/subagents/web-researcher",
+  "maxSteps": 5,
+  "enabled": false
+}
