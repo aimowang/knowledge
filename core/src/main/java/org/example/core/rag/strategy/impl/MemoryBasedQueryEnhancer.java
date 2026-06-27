@@ -7,6 +7,7 @@ import org.example.core.rag.strategy.QueryEnhancementStrategy;
 import org.example.model.ChatMessage;
 import org.example.model.enums.ComplexityLevelEnum;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -22,7 +23,7 @@ public class MemoryBasedQueryEnhancer implements QueryEnhancementStrategy {
     private final ChatClient chatClient;
     private final ResilienceHelper resilienceHelper;
     
-    public MemoryBasedQueryEnhancer(ChatClient chatClient, ResilienceHelper resilienceHelper) {
+    public MemoryBasedQueryEnhancer(@Qualifier("fastChatClient") ChatClient chatClient, ResilienceHelper resilienceHelper) {
         this.chatClient = chatClient;
         this.resilienceHelper = resilienceHelper;
     }

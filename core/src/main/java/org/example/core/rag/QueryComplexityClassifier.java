@@ -2,6 +2,7 @@ package org.example.core.rag;
 
 import org.example.model.enums.ComplexityLevelEnum;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.stereotype.Component;
@@ -12,7 +13,7 @@ import java.util.Map;
 public class QueryComplexityClassifier {
     private final ChatClient chatClient;
 
-    public QueryComplexityClassifier(ChatClient chatClient) {
+    public QueryComplexityClassifier(@Qualifier("fastChatClient") ChatClient chatClient) {
         this.chatClient = chatClient;
     }
 

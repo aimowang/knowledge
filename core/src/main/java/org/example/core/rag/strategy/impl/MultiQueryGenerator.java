@@ -5,6 +5,7 @@ import org.example.core.rag.context.RagContext;
 import org.example.core.resilience.ResilienceHelper;
 import org.example.model.enums.ComplexityLevelEnum;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -22,7 +23,7 @@ public class MultiQueryGenerator {
     private final ChatClient chatClient;
     private final ResilienceHelper resilienceHelper;
     
-    public MultiQueryGenerator(ChatClient chatClient, ResilienceHelper resilienceHelper) {
+    public MultiQueryGenerator(@Qualifier("fastChatClient") ChatClient chatClient, ResilienceHelper resilienceHelper) {
         this.chatClient = chatClient;
         this.resilienceHelper = resilienceHelper;
     }

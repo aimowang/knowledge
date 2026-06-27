@@ -6,6 +6,7 @@ import org.example.core.resilience.ResilienceHelper;
 import org.example.core.rag.strategy.QueryEnhancementStrategy;
 import org.example.model.enums.ComplexityLevelEnum;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,7 +20,7 @@ public class KeywordExpansionEnhancer implements QueryEnhancementStrategy {
     private final ChatClient chatClient;
     private final ResilienceHelper resilienceHelper;
     
-    public KeywordExpansionEnhancer(ChatClient chatClient, ResilienceHelper resilienceHelper) {
+    public KeywordExpansionEnhancer(@Qualifier("fastChatClient") ChatClient chatClient, ResilienceHelper resilienceHelper) {
         this.chatClient = chatClient;
         this.resilienceHelper = resilienceHelper;
     }

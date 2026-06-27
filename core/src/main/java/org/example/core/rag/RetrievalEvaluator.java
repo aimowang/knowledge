@@ -2,6 +2,7 @@ package org.example.core.rag;
 
 import org.example.model.enums.AssessmentEnum;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
@@ -15,7 +16,7 @@ import java.util.stream.Collectors;
 public class RetrievalEvaluator {
     private final ChatClient chatClient;
 
-    public RetrievalEvaluator(ChatClient chatClient) {
+    public RetrievalEvaluator(@Qualifier("fastChatClient") ChatClient chatClient) {
         this.chatClient = chatClient;
     }
 

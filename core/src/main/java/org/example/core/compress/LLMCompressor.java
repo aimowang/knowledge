@@ -1,6 +1,7 @@
 package org.example.core.compress;
 
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.PromptTemplate;
@@ -17,7 +18,7 @@ public class LLMCompressor implements DocumentCompressor {
     private final ChatClient chatClient;
     private final int maxInputTokens;  // 单次压缩允许的最大输入 Token 数
 
-    public LLMCompressor(ChatClient chatClient,
+    public LLMCompressor(@Qualifier("fastChatClient") ChatClient chatClient,
                          @Value("${compressor.llm.max-input-tokens:2000}") int maxInputTokens) {
         this.chatClient = chatClient;
         this.maxInputTokens = maxInputTokens;

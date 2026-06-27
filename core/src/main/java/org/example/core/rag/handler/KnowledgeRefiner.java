@@ -3,6 +3,7 @@ package org.example.core.rag.handler;
 import org.example.core.compress.HybridCompressor;
 import org.example.core.retrieval.ContentRetriever;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Component;
@@ -15,7 +16,7 @@ public class KnowledgeRefiner {
     private final ChatClient chatClient;
     private final HybridCompressor compressor;
 
-    public KnowledgeRefiner(ContentRetriever retriever, ChatClient chatClient, HybridCompressor compressor) {
+    public KnowledgeRefiner(ContentRetriever retriever, @Qualifier("fastChatClient") ChatClient chatClient, HybridCompressor compressor) {
         this.retriever = retriever;
         this.chatClient = chatClient;
         this.compressor = compressor;

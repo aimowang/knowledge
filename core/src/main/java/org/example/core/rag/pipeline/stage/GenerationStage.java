@@ -6,6 +6,7 @@ import org.example.core.rag.context.RagContext;
 import org.example.core.rag.pipeline.PipelineStage;
 import org.example.core.resilience.ResilienceHelper;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.document.Document;
 
 import java.util.List;
@@ -24,7 +25,7 @@ public class GenerationStage implements PipelineStage {
     private final ResilienceHelper resilienceHelper;
     private final RagMetrics ragMetrics;
     
-    public GenerationStage(ChatClient chatClient, ResilienceHelper resilienceHelper, RagMetrics ragMetrics) {
+    public GenerationStage(@Qualifier("fullChatClient") ChatClient chatClient, ResilienceHelper resilienceHelper, RagMetrics ragMetrics) {
         this.chatClient = chatClient;
         this.resilienceHelper = resilienceHelper;
         this.ragMetrics = ragMetrics;
