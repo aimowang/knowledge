@@ -135,6 +135,15 @@ public class KnowledgeQAService {
             .totalDurationMs(0)
             .build();
 
+        // 从 answer metadata 中提取 Agent 执行信息
+        if (answer.getMetadata() != null) {
+            java.util.Map<String, String> meta = answer.getMetadata();
+            if (meta.containsKey("trajectoryId"))
+                response.setTrajectoryId(meta.get("trajectoryId"));
+            if (meta.containsKey("loopCount"))
+                response.setLoopCount(Integer.parseInt(meta.get("loopCount")));
+        }
+
         return response;
     }
 

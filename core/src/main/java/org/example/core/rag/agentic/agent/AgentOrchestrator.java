@@ -136,24 +136,22 @@ public class AgentOrchestrator {
                 .sessionId(state.getTrajectoryId())
                 .put("query", query)
                 .build();
-
             // FR-12.4: 转换门控 - 简单查询跳过深度转换
             TransformationGate gate = new TransformationGate(config.getRouting().getSimpleThreshold());
             String processedQuery = query;
 
             // FR-12.1: 查询分解 - 复合问题拆解为原子子查询
             if (gate.shouldTransform(query)) {
-                
                 QueryDecomposer decomposer = new QueryDecomposer(fastChatClient);
                 var subQueries = decomposer.decompose(query);
                 if (subQueries != null && !subQueries.isEmpty()) {
-                    state.getSubQueriesInternal().addAll(subQueries.stream()
+                    java.util.List<String> queries = subQueries.stream()
                         .map(sq -> sq.getQuery())
-                        .collect(java.util.stream.Collectors.toList()));
-                    processedQuery = subQueries.get(0).getQuery();
+                        .collect(java.util.stream.Collectors.toList());
+                    state.getSubQueriesInternal().addAll(queries);
+                    processedQuery = String.join(" ", queries);
                 }
             }
-
             Msg response = harnessAgent.call(
                 Msg.builder()
                     .textContent(processedQuery)

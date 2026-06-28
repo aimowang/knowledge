@@ -84,6 +84,15 @@ public class AgenticRagFlow extends AbstractRagFlow {
 
         answer.setCategory("agentic");
         answer.setComplexity("COMPLEX");
+
+        // 传递 Agentic 元数据
+        answer.getMetadata().put("trajectoryId", state.getTrajectoryId());
+        answer.getMetadata().put("loopCount", String.valueOf(state.getLoopCount()));
+        answer.getMetadata().put("agenticMode", "true");
+        if (state.getQualityScores() != null) {
+            answer.getMetadata().put("faithfulness",
+                String.valueOf(state.getQualityScores().getFaithfulness()));
+        }
         return answer;
     }
 
