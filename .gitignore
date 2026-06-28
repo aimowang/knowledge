@@ -45,6 +45,10 @@ workspace/*/sessions/
 .claude/settings.local.json
 .claude/worktrees/
 
+### Environment files ###
+.env
+.env.local
+
 ### Misc artifacts ###
 nul
 
