@@ -38,26 +38,13 @@ public class ResilienceHelper {
         this.llmCallExecutor = llmCallExecutor;
     }
 
+
     private final CircuitBreaker llmCircuitBreaker;
     private final CircuitBreaker vectorSearchCircuitBreaker;
     private final Retry llmRetry;
     private final Retry vectorSearchRetry;
     private final TimeLimiter llmTimeLimiter;
     private final TimeLimiter vectorSearchTimeLimiter;
-
-    public ResilienceHelper(CircuitBreaker llmCircuitBreaker,
-                           CircuitBreaker vectorSearchCircuitBreaker,
-                           Retry llmRetry,
-                           Retry vectorSearchRetry,
-                           TimeLimiter llmTimeLimiter,
-                           TimeLimiter vectorSearchTimeLimiter) {
-        this.llmCircuitBreaker = llmCircuitBreaker;
-        this.vectorSearchCircuitBreaker = vectorSearchCircuitBreaker;
-        this.llmRetry = llmRetry;
-        this.vectorSearchRetry = vectorSearchRetry;
-        this.llmTimeLimiter = llmTimeLimiter;
-        this.vectorSearchTimeLimiter = vectorSearchTimeLimiter;
-    }
 
     /**
      * 执行 LLM 调用（带熔断、重试、超时）
