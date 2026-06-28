@@ -16,9 +16,10 @@ import org.example.model.RagAnswer;
 import org.example.model.RagEvaluation;
 import org.example.core.rag.agentic.trajectory.TrajectoryRepository;
 import org.example.core.rag.agentic.trajectory.TrajectoryEntity;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -230,7 +231,10 @@ public class KnowledgeQAController {
         emitter.onTimeout(() -> log.debug("SSE 连接超时"));
 
         // 异步执行（使用 ragRetrievalExecutor 线程池）
+        SecurityContext securityContext = SecurityContextHolder.getContext();
         ragRetrievalExecutor.submit(() -> {
+            // 将 HTTP 线程的 SecurityContext 传播到异步线程
+            SecurityContextHolder.setContext(securityContext);
             try {
                 qaService.askWithAgentStream(request, event -> {
                     try {
@@ -251,6 +255,8 @@ public class KnowledgeQAController {
                         .data("流式处理失败，请稍后重试"));
                 } catch (Exception ignored) {}
                 emitter.completeWithError(e);
+            } finally {
+                SecurityContextHolder.clearContext();
             }
         });
 

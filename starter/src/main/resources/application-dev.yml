@@ -221,7 +221,7 @@ agentic-rag:
     sql-query:
       max-rows: 1000
       query-timeout-ms: 5000
-      enabled: false
+      enabled: true
     memory-query:
       top-k: 5
       enabled: true
@@ -244,7 +244,7 @@ agentic-rag:
       enabled: true
       max-retries: 2
     llm-judge:
-      enabled: false
+      enabled: true
       thresholds:
         faithfulness: 0.7
         answer-relevancy: 0.6
@@ -267,7 +267,7 @@ agentic-rag:
       enabled: false
   routing:
     strategy: rule_llm
-    force-agentic: false
+    force-agentic: true
     force-workflow: false
     simple-threshold: 20
   trajectory:

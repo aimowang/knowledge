@@ -40,9 +40,7 @@ build/
 uploads/
 
 ### Agentic RAG workspace runtime data ###
-workspace/*/agents/
-workspace/*/memory/
-workspace/*/sessions/
+workspace/
 
 ### Claude Code local config ###
 .claude/settings.local.json
@@ -57,3 +55,4 @@ nul
 
 ### Mac OS ###
 .DS_Store
+workspace/

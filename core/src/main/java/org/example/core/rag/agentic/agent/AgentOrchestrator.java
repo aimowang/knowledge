@@ -253,6 +253,7 @@ public class AgentOrchestrator {
             // ════════════════════════════════════════════════════════
             // 阶段 4: Self-Reflection + Corrective Repair
             // ════════════════════════════════════════════════════════
+            try {
             if (config.getQuality().getSelfReflection().isEnabled()) {
                 SelfReflection reflection = new SelfReflection(fastChatClient);
                 ReflectionReport report = reflection.reflect(
@@ -281,10 +282,18 @@ public class AgentOrchestrator {
                         .build());
                 }
             }
+            } catch (Exception e) {
+                log.warn("自反思/纠错阶段异常，跳过修复，使用原始草稿: {}", e.getMessage());
+                state.addStepRecord(StepRecord.builder()
+                    .stepNumber(5).loopNumber(state.getLoopCount()).type("SELF_REFLECTION_SKIP")
+                    .description("自反思跳过: " + e.getMessage())
+                    .build());
+            }
 
             // ════════════════════════════════════════════════════════
             // 阶段 5: LLM Judge 质量评估
             // ════════════════════════════════════════════════════════
+            try {
             if (config.getQuality().getLlmJudge().isEnabled()) {
                 LlmJudge judge = new LlmJudge(fastChatClient);
                 QualityScores scores = judge.evaluate(
@@ -327,6 +336,9 @@ public class AgentOrchestrator {
                         .durationMs(System.currentTimeMillis() - startTime)
                         .build());
                 }
+            }
+            } catch (Exception e) {
+                log.warn("LLM Judge 评估异常，跳过: {}", e.getMessage());
             }
 
             // ════════════════════════════════════════════════════════
@@ -434,6 +446,7 @@ public class AgentOrchestrator {
             state.setDraftAnswer(draft);
 
             // ── 阶段 4: Self-Reflection — 流式场景下简化处理 ──
+            try {
             if (config.getQuality().getSelfReflection().isEnabled()) {
                 onEvent.accept(StreamEvent.check("正在检查答案质量..."));
                 SelfReflection reflection = new SelfReflection(fastChatClient);
@@ -455,8 +468,12 @@ public class AgentOrchestrator {
                     state.setReflectionReport(report);
                 }
             }
+            } catch (Exception e) {
+                log.warn("流式自反思/纠错异常，跳过: {}", e.getMessage());
+            }
 
             // ── 阶段 5: LLM Judge (可选) ──
+            try {
             if (config.getQuality().getLlmJudge().isEnabled()) {
                 LlmJudge judge = new LlmJudge(fastChatClient);
                 QualityScores scores = judge.evaluate(query, draft, state.getSynthesizedContext());
@@ -467,6 +484,9 @@ public class AgentOrchestrator {
                     config.getQuality().getLlmJudge().getThresholds().getCitationGrounding())) {
                     state.setQualityGateFailed(true);
                 }
+            }
+            } catch (Exception e) {
+                log.warn("流式 LLM Judge 异常，跳过: {}", e.getMessage());
             }
 
             // ── 最终: 发射答案 ──
