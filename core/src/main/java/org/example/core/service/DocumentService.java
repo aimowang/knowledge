@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.core.repository.UploadedFileRepository;
 import org.example.model.entity.UploadedFile;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -108,6 +109,7 @@ public class DocumentService {
     /**
      * 删除文件记录及物理文件
      */
+    @Transactional(rollbackFor = Exception.class)
     public boolean delete(Long id) {
         return uploadedFileRepository.findById(id)
                 .map(record -> {

@@ -53,12 +53,10 @@ spring:
       api-key: sk-你的DashScope密钥
       chat:
         enabled: true
-        base-url: https://dashscope.aliyuncs.com/
         options:
           model: qwen-max
       embedding:
         enabled: true
-        base-url: https://dashscope.aliyuncs.com/
         options:
           model: text-embedding-v4
           dimensions: 1536
@@ -196,13 +194,6 @@ management:
       application: ${spring.application.name}
 
 # Sleuth & Zipkin 分布式追踪配置
-  sleuth:
-    sampler:
-      probability: 1.0  # 采样率 100%（生产环境建议 0.1）
-  zipkin:
-    base-url: ${ZIPKIN_URL:http://localhost:9411}
-    sender:
-      type: web
 # ============================================================
 # Agentic RAG 配置
 # ============================================================

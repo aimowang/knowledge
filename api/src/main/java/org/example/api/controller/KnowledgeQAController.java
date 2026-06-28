@@ -1,5 +1,6 @@
 package org.example.api.controller;
 
+import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -149,10 +150,7 @@ public class KnowledgeQAController {
     @PostMapping("/ask/agent")
     @Operation(summary = "Agentic RAG 问答", description = "基于 Agent 的自主推理问答，支持多步推理和质量检查")
     public ResponseEntity<AgenticAskResponse> askWithAgent(
-            @RequestBody AgenticAskRequest request) {
-        if (request.getQuestion() == null || request.getQuestion().isBlank()) {
-            return ResponseEntity.badRequest().build();
-        }
+            @RequestBody @Valid AgenticAskRequest request) {
         try {
             AgenticAskResponse response = qaService.askWithAgentic(request);
             return ResponseEntity.ok(response);
@@ -160,7 +158,7 @@ public class KnowledgeQAController {
             log.error("Agentic 问答失败: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(
                 AgenticAskResponse.builder()
-                    .answer("抱歉，Agent 处理失败: " + e.getMessage())
+                    .answer("抱歉，Agent 处理失败，请稍后重试")
                     .agenticMode(true)
                     .build()
             );
@@ -202,7 +200,7 @@ public class KnowledgeQAController {
     @PostMapping("/ask/agent/stream")
     @Operation(summary = "Agentic RAG 流式问答（SSE）",
                description = "基于 Agent 的自主推理问答，通过 SSE 实时推送执行进度和答案 Token")
-    public SseEmitter askWithAgentStream(@RequestBody AgenticAskRequest request) {
+    public SseEmitter askWithAgentStream(@RequestBody @Valid AgenticAskRequest request) {
         // 校验
         if (request.getQuestion() == null || request.getQuestion().isBlank()) {
             SseEmitter emitter = new SseEmitter(0L);
@@ -237,7 +235,7 @@ public class KnowledgeQAController {
                 try {
                     emitter.send(SseEmitter.event()
                         .name("error")
-                        .data("流式处理失败: " + e.getMessage()));
+                        .data("流式处理失败，请稍后重试"));
                 } catch (Exception ignored) {}
                 emitter.completeWithError(e);
             }
