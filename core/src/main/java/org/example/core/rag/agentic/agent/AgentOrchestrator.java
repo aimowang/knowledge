@@ -16,7 +16,10 @@ import org.example.core.rag.agentic.quality.QualityScores;
 import org.example.core.rag.agentic.quality.ReflectionReport;
 import org.example.core.rag.agentic.quality.SelfReflection;
 import org.example.core.rag.agentic.quality.SufficientContextAgent;
+import org.example.core.rag.agentic.transform.QueryDecomposer;
+import org.example.core.rag.agentic.transform.TransformationGate;
 import org.example.core.rag.agentic.sandbox.SandboxConfigurator;
+import org.example.core.metrics.RagMetrics;
 import org.example.core.rag.agentic.tool.ToolRegistry;
 import org.example.core.rag.agentic.trajectory.TrajectoryRecorder;
 import org.slf4j.Logger;
@@ -56,6 +59,7 @@ public class AgentOrchestrator {
     /** 快速模型 — 分类/检查/评分/转换等轻量任务 */
     private final ChatClient fastChatClient;
     private final SandboxConfigurator sandboxConfigurator;
+    private final RagMetrics ragMetrics;
 
     private HarnessAgent harnessAgent;
 
@@ -64,13 +68,15 @@ public class AgentOrchestrator {
                              TrajectoryRecorder recorder,
                              @Qualifier("fullChatClient") ChatClient fullChatClient,
                              @Qualifier("fastChatClient") ChatClient fastChatClient,
-                             SandboxConfigurator sandboxConfigurator) {
+                             SandboxConfigurator sandboxConfigurator,
+                             RagMetrics ragMetrics) {
         this.toolRegistry = toolRegistry;
         this.config = config;
         this.recorder = recorder;
         this.fullChatClient = fullChatClient;
         this.fastChatClient = fastChatClient;
         this.sandboxConfigurator = sandboxConfigurator;
+        this.ragMetrics = ragMetrics;
     }
 
     @PostConstruct
@@ -113,7 +119,7 @@ public class AgentOrchestrator {
     /**
      * 执行 Agent 主循环。
      */
-    public AgentState execute(String query, String userId) {
+    public synchronized AgentState execute(String query, String userId) {
         AgentState state = new AgentState(query, userId, config);
         long startTime = System.currentTimeMillis();
 
@@ -131,9 +137,26 @@ public class AgentOrchestrator {
                 .put("query", query)
                 .build();
 
+            // FR-12.4: 转换门控 - 简单查询跳过深度转换
+            TransformationGate gate = new TransformationGate(config.getRouting().getSimpleThreshold());
+            String processedQuery = query;
+
+            // FR-12.1: 查询分解 - 复合问题拆解为原子子查询
+            if (gate.shouldTransform(query)) {
+                
+                QueryDecomposer decomposer = new QueryDecomposer(fastChatClient);
+                var subQueries = decomposer.decompose(query);
+                if (subQueries != null && !subQueries.isEmpty()) {
+                    state.getSubQueriesInternal().addAll(subQueries.stream()
+                        .map(sq -> sq.getQuery())
+                        .collect(java.util.stream.Collectors.toList()));
+                    processedQuery = subQueries.get(0).getQuery();
+                }
+            }
+
             Msg response = harnessAgent.call(
                 Msg.builder()
-                    .textContent(query)
+                    .textContent(processedQuery)
                     .build(),
                 ctx
             ).block(Duration.ofMillis(config.getAgent().getMaxTimeoutMs()));
@@ -166,6 +189,7 @@ public class AgentOrchestrator {
                     ).block(Duration.ofMillis(config.getAgent().getSingleToolTimeoutMs()));
 
                     retryCount++;
+                    ragMetrics.incrementRetry("context_check");
                     state.incrementContextRetryCount();
                     state.incrementLoopCount();
                     if (supplementalResponse != null) {
@@ -254,6 +278,7 @@ public class AgentOrchestrator {
             // 最终输出
             // ════════════════════════════════════════════════════════
             state.setFinalAnswer(state.getDraftAnswer());
+            ragMetrics.incrementAgentDecision();
             state.setStatus(AgentStatus.COMPLETED);
 
         } catch (TimeoutException e) {
@@ -288,7 +313,7 @@ public class AgentOrchestrator {
      * <p>与 execute() 逻辑相同，但在每个阶段边界发射事件，
      * 适合 SSE（Server-Sent Events）场景，让客户端实时看到执行进度。
      */
-    public void executeStream(String query, String userId, Consumer<StreamEvent> onEvent) {
+    public synchronized void executeStream(String query, String userId, Consumer<StreamEvent> onEvent) {
         AgentState state = new AgentState(query, userId, config);
         long startTime = System.currentTimeMillis();
 
@@ -337,6 +362,7 @@ public class AgentOrchestrator {
                     ).block(Duration.ofMillis(config.getAgent().getSingleToolTimeoutMs()));
 
                     retryCount++;
+                    ragMetrics.incrementRetry("context_check");
                     state.incrementContextRetryCount();
                     state.incrementLoopCount();
                     if (sr != null) state.mergeContext(sr.getTextContent());

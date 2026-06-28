@@ -40,6 +40,11 @@ public class AgentState {
     /** 轨迹唯一 ID */
     private final String trajectoryId;
 
+    /** 分解后的子查询列表 */
+    private final java.util.List<String> subQueries = new java.util.ArrayList<>();
+
+    public java.util.List<String> getSubQueriesInternal() { return subQueries; }
+
     // ════════════════════════════════════════════════════════════
     // 执行层
     // ════════════════════════════════════════════════════════════

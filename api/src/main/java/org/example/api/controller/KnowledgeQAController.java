@@ -14,6 +14,8 @@ import org.example.model.AgenticAskResponse;
 import org.example.model.AskRequest;
 import org.example.model.RagAnswer;
 import org.example.model.RagEvaluation;
+import org.example.core.rag.agentic.trajectory.TrajectoryRepository;
+import org.example.core.rag.agentic.trajectory.TrajectoryEntity;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
@@ -37,15 +39,18 @@ public class KnowledgeQAController {
     private final ShortTermMemoryManager shortTermMemoryManager;
     private final CacheService cacheService;
     private final ThreadPoolTaskExecutor ragRetrievalExecutor;
+    private final TrajectoryRepository trajectoryRepository;
 
     public KnowledgeQAController(KnowledgeQAService qaService, EvaluationManager evaluationManager,
                                   ShortTermMemoryManager shortTermMemoryManager, CacheService cacheService,
-                                  ThreadPoolTaskExecutor ragRetrievalExecutor) {
+                                  ThreadPoolTaskExecutor ragRetrievalExecutor,
+                                  TrajectoryRepository trajectoryRepository) {
         this.qaService = qaService;
         this.evaluationManager = evaluationManager;
         this.shortTermMemoryManager = shortTermMemoryManager;
         this.cacheService = cacheService;
         this.ragRetrievalExecutor = ragRetrievalExecutor;
+        this.trajectoryRepository = trajectoryRepository;
     }
 
     /**
@@ -170,12 +175,23 @@ public class KnowledgeQAController {
      */
     @GetMapping("/trajectory/{trajectoryId}")
     @Operation(summary = "查询 Agent 轨迹", description = "获取 Agent 执行的完整决策路径")
-    public ResponseEntity<Map<String, Object>> getTrajectory(
+    public ResponseEntity<?> getTrajectory(
             @PathVariable String trajectoryId) {
+        var entity = trajectoryRepository.findById(trajectoryId);
+        if (entity.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        TrajectoryEntity t = entity.get();
         return ResponseEntity.ok(Map.of(
-            "trajectoryId", trajectoryId,
-            "status", "AVAILABLE",
-            "message", "轨迹详情将在 Phase 3 中完整实现"
+            "trajectoryId", t.getId(),
+            "userId", t.getUserId(),
+            "query", t.getQuery(),
+            "status", t.getStatus(),
+            "totalDurationMs", t.getTotalDurationMs(),
+            "totalLoops", t.getTotalLoops(),
+            "totalSteps", t.getTotalSteps(),
+            "qualityScores", t.getQualityScores(),
+            "createdAt", t.getCreatedAt().toString()
         ));
     }
 
