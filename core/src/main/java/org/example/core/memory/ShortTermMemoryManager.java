@@ -10,8 +10,9 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -28,7 +29,10 @@ public class ShortTermMemoryManager {
     /**
      * 用户ID -> 对话历史（内存缓存，加速读取）
      */
-    private final Map<String, UserSession> userSessions = new ConcurrentHashMap<>();
+    private final Cache<String, UserSession> userSessions = Caffeine.newBuilder()
+            .expireAfterAccess(Duration.ofMinutes(30))
+            .maximumSize(10000)
+            .build();
     
     /**
      * 默认最大消息数（每个会话）
@@ -51,7 +55,7 @@ public class ShortTermMemoryManager {
      */
     public UserSession getOrCreateSession(String userId) {
         // 1. 先从内存缓存获取
-        UserSession session = userSessions.get(userId);
+        UserSession session = userSessions.getIfPresent(userId);
         if (session != null && !session.isExpired(SESSION_EXPIRE_MINUTES)) {
             session.refreshLastAccessTime();
             return session;
@@ -104,7 +108,7 @@ public class ShortTermMemoryManager {
      * 获取用户的对话历史（用于构建上下文）
      */
     public List<ChatMessage> getConversationHistory(String userId) {
-        UserSession session = userSessions.get(userId);
+        UserSession session = userSessions.getIfPresent(userId);
         if (session == null) {
             return List.of();
         }
@@ -112,7 +116,7 @@ public class ShortTermMemoryManager {
         // 清理过期会话
         if (session.isExpired(SESSION_EXPIRE_MINUTES)) {
             log.info("用户 {} 会话已过期，清理中...", userId);
-            userSessions.remove(userId);
+            userSessions.invalidate(userId);
             return List.of();
         }
         
@@ -146,7 +150,7 @@ public class ShortTermMemoryManager {
      * 清空用户会话
      */
     public void clearSession(String userId) {
-        userSessions.remove(userId);
+        userSessions.invalidate(userId);
         redisTemplate.delete("session:" + userId);
         log.info("已清空用户 {} 的会话", userId);
     }
@@ -168,7 +172,7 @@ public class ShortTermMemoryManager {
      * 获取活跃会话数
      */
     public int getActiveSessionCount() {
-        return userSessions.size();
+        return (int) userSessions.estimatedSize();
     }
     
     /**

@@ -28,7 +28,8 @@ public class ExternalSearchService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ExternalSearchService(RestClient.Builder restClientBuilder) {
-        this.restClient = restClientBuilder.build();
+        this.restClient = restClientBuilder
+                .build();
     }
 
     @Value("${external.search.api-key:}")

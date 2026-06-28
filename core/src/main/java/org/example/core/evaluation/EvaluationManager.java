@@ -4,6 +4,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.example.core.repository.RagEvaluationRepository;
 import org.example.model.RagEvaluation;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -131,7 +132,7 @@ public class EvaluationManager {
      * 获取低质量评估（用于改进）
      */
     public List<RagEvaluation> getLowQualityEvaluations(double threshold) {
-        return repository.findAll().stream()
+        return repository.findAll(Pageable.unpaged()).stream()
                 .map(this::convertToModel)
                 .filter(e -> e.getOverallScore() != null && e.getOverallScore() < threshold)
                 .sorted((a, b) -> Double.compare(

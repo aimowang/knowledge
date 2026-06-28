@@ -7,6 +7,7 @@ import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.github.benmanes.caffeine.cache.Cache;
@@ -22,15 +23,14 @@ import java.time.Duration;
 @Component
 public class RateLimitFilter implements Filter {
 
+    @Value("${ratelimit.max-requests-per-minute:100}")
+
     private final Cache<String, Bucket> buckets = Caffeine.newBuilder()
             .expireAfterAccess(Duration.ofMinutes(10))
             .maximumSize(10000)
             .build();
-    private final int maxRequestsPerMinute;
+    private int maxRequestsPerMinute;
 
-    public RateLimitFilter() {
-        this.maxRequestsPerMinute = 100; // 默认 100 请求/分钟
-    }
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)

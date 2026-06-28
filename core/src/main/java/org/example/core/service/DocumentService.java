@@ -73,7 +73,9 @@ public class DocumentService {
 
         try {
             // ① 保存文件到磁盘
-            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
+            try (var is = file.getInputStream()) {
+            Files.copy(is, targetPath, StandardCopyOption.REPLACE_EXISTING);
+        }
             log.info("文件保存成功: {} -> {}", originalName, targetPath);
 
             // ② 向量数据库插入

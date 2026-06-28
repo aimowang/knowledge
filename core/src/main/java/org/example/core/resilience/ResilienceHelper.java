@@ -4,6 +4,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.timelimiter.TimeLimiter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.CompletableFuture;
@@ -17,6 +18,25 @@ import java.util.function.Supplier;
 @Slf4j
 @Component
 public class ResilienceHelper {
+
+    private ThreadPoolTaskExecutor llmCallExecutor;
+
+    public ResilienceHelper(
+            CircuitBreaker llmCircuitBreaker,
+            Retry llmRetry,
+            TimeLimiter llmTimeLimiter,
+            CircuitBreaker vectorSearchCircuitBreaker,
+            Retry vectorSearchRetry,
+            TimeLimiter vectorSearchTimeLimiter,
+            ThreadPoolTaskExecutor llmCallExecutor) {
+        this.llmCircuitBreaker = llmCircuitBreaker;
+        this.llmRetry = llmRetry;
+        this.llmTimeLimiter = llmTimeLimiter;
+        this.vectorSearchCircuitBreaker = vectorSearchCircuitBreaker;
+        this.vectorSearchRetry = vectorSearchRetry;
+        this.vectorSearchTimeLimiter = vectorSearchTimeLimiter;
+        this.llmCallExecutor = llmCallExecutor;
+    }
 
     private final CircuitBreaker llmCircuitBreaker;
     private final CircuitBreaker vectorSearchCircuitBreaker;
@@ -56,7 +76,7 @@ public class ResilienceHelper {
         try {
             return TimeLimiter.decorateFutureSupplier(
                 llmTimeLimiter, 
-                () -> CompletableFuture.supplyAsync(circuitBreakerSupplier)
+                () -> CompletableFuture.supplyAsync(circuitBreakerSupplier, llmCallExecutor)
             ).call();
         } catch (Exception e) {
             log.warn("LLM 调用失败，触发降级逻辑: {}", e.getMessage());
@@ -77,7 +97,7 @@ public class ResilienceHelper {
         try {
             return TimeLimiter.decorateFutureSupplier(
                 vectorSearchTimeLimiter,
-                () -> CompletableFuture.supplyAsync(circuitBreakerSupplier)
+                () -> CompletableFuture.supplyAsync(circuitBreakerSupplier, llmCallExecutor)
             ).call();
         } catch (Exception e) {
             log.warn("向量搜索失败，触发降级逻辑: {}", e.getMessage());

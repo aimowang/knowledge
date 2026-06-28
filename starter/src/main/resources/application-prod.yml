@@ -2,9 +2,12 @@
 # 在 Docker Compose 网络中运行时，服务名直接使用容器名
 
 server:
+  shutdown: graceful
   port: 8080
 
 spring:
+  application:
+    name: knowledge-rag
   main:
     allow-bean-definition-overriding: true
 
@@ -34,10 +37,12 @@ spring:
           max-active: 16
           max-idle: 8
           min-idle: 4
+          max-wait: 1000ms
+      timeout: 3000ms
 
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     show-sql: false
     properties:
       hibernate:
@@ -54,12 +59,10 @@ spring:
         collection-name: ai_knowledge_milvus
         embedding-dimension: 1536
 
-# 分布式追踪（生产环境降低采样率）
-  sleuth:
-    sampler:
+# 分布式追踪
+  tracing:
+    sampling:
       probability: 0.1
-  zipkin:
-    base-url: ${ZIPKIN_URL:http://zipkin:9411}
 
 management:
   endpoints:
@@ -119,3 +122,112 @@ logging:
     name: /var/log/knowledge-rag/application.log
     max-size: 10MB
     max-history: 30
+
+
+# Retriever 配置
+retriever:
+  max-results: 5
+  min-score: 0.5
+  lambda: 0.5
+
+# 上下文压缩配置
+compressor:
+  embedding:
+    threshold: 0.6
+    min-sentences: 2
+  llm:
+    max-input-tokens: 2000
+
+# 外部搜索配置
+external:
+  search:
+    api-key: ${EXTERNAL_SEARCH_API_KEY:}
+    provider: tavily
+
+# JWT 配置
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: 86400000
+
+# 速率限制
+ratelimit:
+  max-requests-per-minute: 200
+
+# ============================================================
+# Agentic RAG 配置
+# ============================================================
+agentic-rag:
+  enabled: true
+  agent:
+    name: "KnowledgeAssistant"
+    model: "deepseek-v4-flush"
+    max-loops: 5
+    max-context-retries: 3
+    max-repair-retries: 2
+    total-steps-limit: 20
+    max-timeout-ms: 60000
+    single-tool-timeout-ms: 30000
+    enable-streaming: true
+  tool:
+    vector-search:
+      top-k: 5
+      similarity-threshold: 0.0
+    bm25-search:
+      top-k: 5
+    external-search:
+      top-k: 3
+      enabled: true
+    sql-query:
+      max-rows: 1000
+      query-timeout-ms: 5000
+      enabled: false
+    memory-query:
+      top-k: 5
+      enabled: true
+  workspace:
+    path: "./workspace/knowledge-agent"
+    auto-init: true
+    memory:
+      enabled: true
+      consolidation-interval: 3600
+      max-daily-logs: 30
+      importance-threshold: 0.6
+  quality:
+    context-check:
+      enabled: true
+      max-retries: 3
+      improvement-threshold: 2
+    self-reflection:
+      enabled: true
+    corrective-repair:
+      enabled: true
+      max-retries: 2
+    llm-judge:
+      enabled: false
+      thresholds:
+        faithfulness: 0.7
+        answer-relevancy: 0.6
+        citation-grounding: 0.8
+  hook:
+    compaction:
+      enabled: true
+      max-history-length: 50
+      max-tokens: 4096
+      strategy: semantic
+      preserve-last-n: 5
+    token-counter:
+      enabled: true
+      max-prompt-tokens: 8192
+      max-response-tokens: 2048
+    rate-limit:
+      enabled: false
+      max-calls-per-minute: 30
+    safety:
+      enabled: false
+  routing:
+    force-agentic: false
+    force-workflow: false
+    simple-threshold: 20
+  trajectory:
+    enabled: true
+    retention-days: 30
