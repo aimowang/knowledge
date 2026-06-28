@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -60,6 +61,9 @@ public class AgentOrchestrator {
     private final ChatClient fastChatClient;
     private final SandboxConfigurator sandboxConfigurator;
     private final RagMetrics ragMetrics;
+
+    @Value("${spring.ai.dashscope.api-key}")
+    private String dashScopeApiKey;
 
     private HarnessAgent harnessAgent;
 
@@ -100,7 +104,7 @@ public class AgentOrchestrator {
             .name(config.getAgent().getName())
             .workspace(java.nio.file.Paths.get(config.getWorkspace().getPath()))
             .model(DashScopeChatModel.builder()
-                .apiKey(System.getenv("DASHSCOPE_API_KEY"))
+                .apiKey(dashScopeApiKey)
                 .modelName(config.getAgent().getModel())
                 .stream(config.getAgent().isEnableStreaming())
                 .build())
