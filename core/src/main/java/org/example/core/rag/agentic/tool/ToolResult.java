@@ -25,7 +25,7 @@ public class ToolResult {
     private final long durationMs;
 
     public static ToolResult success(Object data) {
-        return new ToolResult(true, data, null, System.currentTimeMillis());
+        return new ToolResult(true, data, null, 0);
     }
 
     public static ToolResult success(Object data, long durationMs) {

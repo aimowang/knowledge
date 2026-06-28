@@ -11,6 +11,8 @@ import org.example.model.entity.RefreshTokenEntity;
 import org.example.model.entity.User;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -19,6 +21,7 @@ import java.util.UUID;
 @Slf4j
 @RestController
 @RequestMapping("/api/auth")
+@Tag(name = "认证管理", description = "用户注册、登录、Token 刷新")
 public class AuthController {
 
     private final UserRepository userRepository;

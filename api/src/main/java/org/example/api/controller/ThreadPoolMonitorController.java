@@ -1,5 +1,7 @@
 package org.example.api.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,6 +17,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/monitor")
+@Tag(name = "监控管理", description = "线程池状态和系统监控")
 public class ThreadPoolMonitorController {
 
     private final ThreadPoolTaskExecutor ragRetrievalExecutor;

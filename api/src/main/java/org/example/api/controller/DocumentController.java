@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.core.service.DocumentService;
 import org.example.model.entity.UploadedFile;
 import org.springframework.http.ResponseEntity;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -17,6 +19,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/documents")
+@Tag(name = "文档管理", description = "上传和删除知识库文档")
 public class DocumentController {
 
     @Resource
