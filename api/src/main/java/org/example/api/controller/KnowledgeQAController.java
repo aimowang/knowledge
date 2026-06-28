@@ -95,13 +95,10 @@ public class KnowledgeQAController {
     public String clearSession(
             @Parameter(description = "用户ID", required = true, example = "user123")
             @PathVariable String userId) {
-        // 1. 清除 MySQL 评估历史
-//        evaluationManager.clearUserEvaluations(userId);
-        // 2. 清除 Redis 短时会话
+        // 清除 Redis 短时会话和问答缓存
         shortTermMemoryManager.clearSession(userId);
-        // 3. 清除 Redis 问答缓存
         cacheService.clearUserCache(userId);
-        log.info("用户 {} 的会话、缓存和评估已全部清空", userId);
+        log.info("用户 {} 的会话和缓存已全部清空", userId);
         return "会话已清空";
     }
 

@@ -1,10 +1,10 @@
 package org.example.core.rag.agentic.agent;
 
 import io.agentscope.core.agent.RuntimeContext;
-
-import org.slf4j.MDC;
-import io.agentscope.core.hook.Hook;
+import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.message.Msg;
+import io.agentscope.core.middleware.ActingInput;
+import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.model.DashScopeChatModel;
 import io.agentscope.harness.agent.HarnessAgent;
 import jakarta.annotation.PostConstruct;
@@ -22,17 +22,22 @@ import org.example.core.rag.agentic.sandbox.SandboxConfigurator;
 import org.example.core.metrics.RagMetrics;
 import org.example.core.rag.agentic.tool.ToolRegistry;
 import org.example.core.rag.agentic.trajectory.TrajectoryRecorder;
+import org.example.core.rag.agentic.tool.ToolResult;
+import org.example.core.rag.agentic.trajectory.StepRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Mono;
-
+import reactor.core.publisher.Flux;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 /**
@@ -109,10 +114,7 @@ public class AgentOrchestrator {
                 .stream(config.getAgent().isEnableStreaming())
                 .build())
             .maxIters(config.getAgent().getMaxLoops())
-            .hooks(List.of(
-                new QualityCheckHook(),
-                new MetricsCollectHook()
-            ));
+            .middleware(new ToolCallCaptureMiddleware());
 
         // 可选：按需启用沙箱隔离
         sandboxConfigurator.configure(builder);
@@ -139,6 +141,7 @@ public class AgentOrchestrator {
                 .userId(userId)
                 .sessionId(state.getTrajectoryId())
                 .put("query", query)
+                .put("agentState", state)
                 .build();
             // FR-12.4: 转换门控 - 简单查询跳过深度转换
             TransformationGate gate = new TransformationGate(config.getRouting().getSimpleThreshold());
@@ -154,6 +157,10 @@ public class AgentOrchestrator {
                         .collect(java.util.stream.Collectors.toList());
                     state.getSubQueriesInternal().addAll(queries);
                     processedQuery = String.join(" ", queries);
+                    state.addStepRecord(StepRecord.builder()
+                        .stepNumber(1).loopNumber(0).type("QUERY_DECOMPOSE")
+                        .description("查询分解为 " + queries.size() + " 个子查询")
+                        .build());
                 }
             }
             Msg response = harnessAgent.call(
@@ -169,6 +176,32 @@ public class AgentOrchestrator {
 
             state.setAgentRawResponse(response.getTextContent());
             state.setSynthesizedContext(response.getTextContent());
+            state.addStepRecord(StepRecord.builder()
+                .stepNumber(2).loopNumber(0).type("AGENT_REASONING")
+                .description("Agent 自主推理完成")
+                .durationMs(System.currentTimeMillis() - startTime)
+                .build());
+
+            // Step-Back 查询：当检索结果过短或无结果时放宽查询
+            if (response.getTextContent() == null || response.getTextContent().length() < 50) {
+                org.example.core.rag.agentic.transform.StepBackQuery stepBack = 
+                    new org.example.core.rag.agentic.transform.StepBackQuery(fastChatClient);
+                String steppedQuery = stepBack.stepBack(query, "检索结果为空或过短");
+                if (!steppedQuery.equals(query)) {
+                    log.info("Step-Back 查询: '{}' → '{}'", query, steppedQuery);
+                    state.addStepRecord(StepRecord.builder()
+                        .stepNumber(2).loopNumber(0).type("STEP_BACK_QUERY")
+                        .description("退一步查询: " + steppedQuery)
+                        .build());
+                    // 用放宽的查询重新调用 Agent
+                    Msg stepBackResponse = harnessAgent.call(
+                        Msg.builder().textContent(steppedQuery).build(), ctx
+                    ).block(Duration.ofMillis(config.getAgent().getMaxTimeoutMs()));
+                    if (stepBackResponse != null) {
+                        state.setSynthesizedContext(stepBackResponse.getTextContent());
+                    }
+                }
+            }
 
             // ════════════════════════════════════════════════════════
             // 阶段 2: SufficientContextAgent 完备性检查
@@ -200,12 +233,22 @@ public class AgentOrchestrator {
                     verdict = contextAgent.check(query, state.getSynthesizedContext());
                 }
                 state.setContextVerdict(verdict);
+                state.addStepRecord(StepRecord.builder()
+                    .stepNumber(3).loopNumber(state.getLoopCount()).type("CONTEXT_CHECK")
+                    .description("上下文完备性检查: " + (verdict.isSufficient() ? "通过" : "失败"))
+                    .durationMs(System.currentTimeMillis() - startTime)
+                    .build());
             }
 
             // ════════════════════════════════════════════════════════
             // 阶段 3: 生成答案草稿
             // ════════════════════════════════════════════════════════
             state.setDraftAnswer(generateDraft(query, state.getSynthesizedContext(), fullChatClient));
+            state.addStepRecord(StepRecord.builder()
+                .stepNumber(4).loopNumber(state.getLoopCount()).type("GENERATE_DRAFT")
+                .description("答案草稿生成完成")
+                .durationMs(System.currentTimeMillis() - startTime)
+                .build());
 
             // ════════════════════════════════════════════════════════
             // 阶段 4: Self-Reflection + Corrective Repair
@@ -231,6 +274,11 @@ public class AgentOrchestrator {
                     }
                     state.setReflectionReport(report);
                     state.setDraftAnswer(state.getDraftAnswer());
+                    state.addStepRecord(StepRecord.builder()
+                        .stepNumber(5).loopNumber(state.getLoopCount()).type("SELF_REFLECTION")
+                        .description("自反思" + (report.hasIssues() ? "发现" + state.getRepairCount() + "个问题" : "通过"))
+                        .durationMs(System.currentTimeMillis() - startTime)
+                        .build());
                 }
             }
 
@@ -273,6 +321,11 @@ public class AgentOrchestrator {
                         state.incrementRepairCount();
                     }
                     state.setQualityScores(scores);
+                    state.addStepRecord(StepRecord.builder()
+                        .stepNumber(6).loopNumber(state.getLoopCount()).type("QUALITY_JUDGE")
+                        .description("LLM Judge 质量评估" + (state.isQualityGateFailed() ? "未通过" : "通过"))
+                        .durationMs(System.currentTimeMillis() - startTime)
+                        .build());
                 }
             }
 
@@ -498,36 +551,31 @@ public class AgentOrchestrator {
     }
 
     // ════════════════════════════════════════════════════════════
-    // 自定义 HarnessAgent Hook
+    // 工具调用捕获 Middleware
     // ════════════════════════════════════════════════════════════
 
-    public static class QualityCheckHook implements Hook {
-        private static final Logger log = LoggerFactory.getLogger(QualityCheckHook.class);
+    /**
+     * 中间件 — 捕获 HarnessAgent 执行过程中的工具调用。
+     * 通过 RuntimeContext 获取 AgentState 并记录工具名和参数。
+     */
+    public static class ToolCallCaptureMiddleware implements MiddlewareBase {
 
         @Override
-        public <T extends io.agentscope.core.hook.HookEvent> Mono<T> onEvent(T event) {
-            log.debug("QualityCheckHook 处理事件: {}", event.getClass().getSimpleName());
-            return Mono.just(event);
-        }
-
-        @Override
-        public int priority() {
-            return 200;
-        }
-    }
-
-    public static class MetricsCollectHook implements Hook {
-        private static final Logger log = LoggerFactory.getLogger(MetricsCollectHook.class);
-
-        @Override
-        public <T extends io.agentscope.core.hook.HookEvent> Mono<T> onEvent(T event) {
-            log.debug("MetricsCollectHook: {}", event.getClass().getSimpleName());
-            return Mono.just(event);
-        }
-
-        @Override
-        public int priority() {
-            return 100;
+        public Flux<AgentEvent> onActing(io.agentscope.core.agent.Agent agent,
+                                          RuntimeContext ctx,
+                                          ActingInput input,
+                                          java.util.function.Function<ActingInput, Flux<AgentEvent>> next) {
+            AgentState state = ctx.get("agentState");
+            if (state != null && input.toolCalls() != null) {
+                for (var tc : input.toolCalls()) {
+                    state.addToolCall(
+                        tc.getName(),
+                        tc.getInput() != null ? tc.getInput() : java.util.Map.of(),
+                        new ToolResult(true, tc.getContent() != null ? tc.getContent() : "pending", null, 0L)
+                    );
+                }
+            }
+            return next.apply(input);
         }
     }
 

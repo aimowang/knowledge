@@ -36,6 +36,9 @@ build/
 ### VS Code ###
 .vscode/
 
+### Uploaded documents ###
+uploads/
+
 ### Agentic RAG workspace runtime data ###
 workspace/*/agents/
 workspace/*/memory/

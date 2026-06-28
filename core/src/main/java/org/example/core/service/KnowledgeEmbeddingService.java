@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -34,10 +35,9 @@ public class KnowledgeEmbeddingService {
             String type = split[split.length - 1];
             log.info("开始处理文件: {}, 类型: {}", file.getName(), type);
 
-            // todo: 清除字符串中的非法代理项（unpaired surrogates）以及不可见的控制字符。
-            //     * 保留合法的 Unicode 字符（包括完整代理对表示的 Emoji）
-            List<Document> docs = getLoader(type).load(file);
-            List<Document> chunks = getSplitter(type).split(docs);
+            // 清除文档中的非法代理项（unpaired surrogates），否则 Milvus gRPC 会报错
+            List<Document> docs = sanitizeDocuments(getLoader(type).load(file));
+            List<Document> chunks = sanitizeDocuments(getSplitter(type).split(docs));
             if (chunks.isEmpty()) {
                 log.warn("文件 {} 未产生有效分块", file.getName());
                 continue;
@@ -53,6 +53,45 @@ public class KnowledgeEmbeddingService {
             }
             log.info("文件 {} 处理完成, 共 {} 个分块", file.getName(), chunks.size());
         }
+    }
+
+    /**
+     * 清除文档内容中的非法代理项（unpaired surrogates），
+     * 保留合法 Unicode 字符（包括完整代理对表示的 Emoji）。
+     */
+    private List<Document> sanitizeDocuments(List<Document> documents) {
+        List<Document> result = new ArrayList<>(documents.size());
+        for (Document doc : documents) {
+            String clean = sanitizeText(doc.getText());
+            // 创建新 Document（Spring AI Document 不可变，无 setText）
+            Document sanitized = new Document(clean, new java.util.HashMap<>(doc.getMetadata()));
+            result.add(sanitized);
+        }
+        return result;
+    }
+
+    /**
+     * 清除字符串中的非法代理项，保留合法字符。
+     */
+    private String sanitizeText(String text) {
+        if (text == null || text.isEmpty()) return text;
+        StringBuilder sb = new StringBuilder(text.length());
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isHighSurrogate(c)) {
+                if (i + 1 < text.length() && Character.isLowSurrogate(text.charAt(i + 1))) {
+                    sb.append(c);          // 完整代理对，保留
+                    sb.append(text.charAt(++i));
+                } else {
+                    sb.append('�');   // 孤高代理 → 替换字符
+                }
+            } else if (Character.isLowSurrogate(c)) {
+                sb.append('�');       // 孤低代理 → 替换字符
+            } else {
+                sb.append(c);              // 正常字符，保留
+            }
+        }
+        return sb.toString();
     }
 
     private DocumentLoader getLoader(String type) {

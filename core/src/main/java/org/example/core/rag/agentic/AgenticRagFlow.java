@@ -89,6 +89,8 @@ public class AgenticRagFlow extends AbstractRagFlow {
         answer.getMetadata().put("trajectoryId", state.getTrajectoryId());
         answer.getMetadata().put("loopCount", String.valueOf(state.getLoopCount()));
         answer.getMetadata().put("agenticMode", "true");
+        answer.getMetadata().put("totalDurationMs", String.valueOf(state.getTotalDurationMs()));
+        answer.getMetadata().put("qualityGateFailed", String.valueOf(state.isQualityGateFailed()));
         if (state.getQualityScores() != null) {
             answer.getMetadata().put("faithfulness",
                 String.valueOf(state.getQualityScores().getFaithfulness()));

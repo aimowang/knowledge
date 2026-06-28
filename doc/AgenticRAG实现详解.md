@@ -134,13 +134,18 @@ Msg response = harnessAgent.call(msg, ctx).block();
 HarnessAgent.builder()
     .name("KnowledgeAssistant")
     .model(DashScopeChatModel.builder()
-        .apiKey(System.getenv("DASHSCOPE_API_KEY"))
+        .apiKey(dashScopeApiKey)
         .modelName("qwen-max").build())
     .workspace(Paths.get("./workspace/knowledge-agent"))
     .maxIters(5)
-    .hooks(List.of(new QualityCheckHook(), new MetricsCollectHook()))
+    .middleware(new ToolCallCaptureMiddleware())
     .build();
 ```
+
+> **注意:** `Hook` API (`io.agentscope.core.hook.Hook`) 已标记 deprecated，
+> 推荐使用 `MiddlewareBase`。Phase 1 原有两个只做日志的 Hook（`QualityCheckHook` / `MetricsCollectHook`），
+> 在 Phase 2 已替换为 `ToolCallCaptureMiddleware`，负责记录 Agent 执行中的工具调用。
+> 配置类 `AgentConfig.Hook` 及 4 个子类（`Compaction` / `TokenCounter` / `RateLimit` / `Safety`）已一并移除。
 
 ---
 
@@ -152,25 +157,39 @@ HarnessAgent.builder()
 AgentOrchestrator.execute(query, userId)
   │
   ├─ 0. 初始化 AgentState + MDC 上下文
+  │      ├─ 生成 trajectoryId
+  │      └─ 创建 toolCalls / trajectory / subQueries 容器
   │
-  ├─ 1. HarnessAgent 自主推理（ReAct 循环）
+  ├─ 1. 查询分解 (TransformationGate + QueryDecomposer)
+  │      复合问题 → 原子子查询 → StepRecord.QUERY_DECOMPOSE
+  │
+  ├─ 2. HarnessAgent ReAct 循环
   │      call(msg, ctx).block()
-  │      ├─ AGENTS.md → System Prompt
-  │      ├─ ReAct: 分析 → 工具调用 → 观察 → 循环
-  │      └─ 会话自动持久化
+  │      ├─ ToolCallCaptureMiddleware 拦截工具调用
+  │      ├─ 会话自动持久化
+  │      └─ StepRecord.AGENT_REASONING
   │
-  ├─ 2. SufficientContextAgent 完备性检查
-  │      LLM 判断 → 不足 → 补充检索 (最多 3 轮)
+  ├─ 3. Step-Back 查询（检索结果 < 50 字符时触发）
+  │      StepBackQuery -> 放宽查询 -> 重新调用
+  │      └─ StepRecord.STEP_BACK_QUERY
   │
-  ├─ 3. 生成答案草稿 (ChatClient)
+  ├─ 4. SufficientContextAgent 完备性检查
+  │      LLM 判断 -> 不足 -> 补充检索 (最多 3 轮)
+  │      └─ StepRecord.CONTEXT_CHECK
   │
-  ├─ 4. SelfReflection + CorrectiveRepair
-  │      引用检查 → 覆盖检查 → 矛盾检测 → 修复 (最多 2 轮)
+  ├─ 5. 生成答案草稿 (ChatClient)
+  │      └─ StepRecord.GENERATE_DRAFT
   │
-  ├─ 5. LLM Judge 质量评估 (可选)
-  │      Faithfulness/Relevancy/Citation 三维评分
+  ├─ 6. SelfReflection + CorrectiveRepair
+  │      引用/覆盖/矛盾检测 -> 修复 (最多 2 轮)
+  │      └─ StepRecord.SELF_REFLECTION
   │
-  └─ 6. 记录轨迹到 MySQL agent_trajectories 表
+  ├─ 7. LLM Judge 质量评估 (可选)
+  │      三维评分 -> 不通过则重生成
+  │      └─ StepRecord.QUALITY_JUDGE
+  │
+  └─ 8. 记录轨迹到 MySQL
+         └─ 含 steps / toolCalls / qualityScores
 ```
 
 ### 3.2 循环控制
@@ -562,3 +581,14 @@ public SseEmitter askWithAgentStream(@RequestBody AgenticAskRequest request) {
 | `b63b586` | 渐进式分页读取 | 2 |
 | `d5400d8` | 记忆摘要 + 渐进式读取 | 4 |
 | `c24c3d1` | 批量 17 项优化 | 10 |
+| `HEAD` | **Phase 2 质量 + 遗留项治理** | **9** |
+| | Hook -> Middleware 迁移：移除 QualityCheckHook / MetricsCollectHook，替换为 ToolCallCaptureMiddleware | AgentOrchestrator |
+| | AgentConfig.Hook 及 4 个子类配置移除 | AgentConfig |
+| | 线程安全修复：askWithAgentic save/restore 模式 | KnowledgeQAService |
+| | totalDurationMs / qualityGateFailed 元数据透传 | AgenticRagFlow / KnowledgeQAService |
+| | selectRagFlow 分类路由逻辑恢复 | KnowledgeQAService |
+| | 文档内容 Unicode 非法代理项清理 | KnowledgeEmbeddingService |
+| | Step-Back 查询接入 Agent 主循环 | AgentOrchestrator |
+| | ToolCallCaptureMiddleware 工具调用捕获 + StepRecord 六阶段轨迹记录 | AgentOrchestrator |
+| | SandboxConfigurator DockerFilesystemSpec 实际注入 | SandboxConfigurator |
+| | Controller 注释代码清理 | KnowledgeQAController |

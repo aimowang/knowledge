@@ -75,8 +75,46 @@ public class SandboxConfigurator {
                 config.getSandbox().getMemoryLimit(),
                 config.getSandbox().getCpuLimit(),
                 config.getSandbox().isNetworkAccess() ? "enabled" : "disabled");
+
+            // 构建 DockerFilesystemSpec 并注入 builder
+            String memLimit = config.getSandbox().getMemoryLimit();
+            long memBytes = parseMemoryToBytes(memLimit);
+            double cpuLimit = config.getSandbox().getCpuLimit();
+
+            io.agentscope.harness.agent.sandbox.impl.docker.DockerFilesystemSpec fsSpec =
+                new io.agentscope.harness.agent.sandbox.impl.docker.DockerFilesystemSpec();
+            fsSpec.memorySizeBytes(memBytes);
+            fsSpec.cpuCount((long) Math.ceil(cpuLimit));
+            if (config.getSandbox().isNetworkAccess()) {
+                fsSpec.network("host");
+            } else {
+                fsSpec.network("none");
+            }
+            builder.filesystem(fsSpec);
+            log.info("DockerFilesystemSpec 已配置: memory={}, cpu={}", memLimit, cpuLimit);
         }
 
         return builder;
+    }
+
+    /**
+     * 将内存大小字符串（如 "512m", "2g"）解析为字节数。
+     */
+    private long parseMemoryToBytes(String memory) {
+        if (memory == null || memory.isBlank()) return 512L * 1024 * 1024;
+        memory = memory.trim().toLowerCase();
+        try {
+            if (memory.endsWith("g") || memory.endsWith("gb")) {
+                return Long.parseLong(memory.replaceAll("[^0-9]", "")) * 1024L * 1024 * 1024;
+            } else if (memory.endsWith("m") || memory.endsWith("mb")) {
+                return Long.parseLong(memory.replaceAll("[^0-9]", "")) * 1024L * 1024;
+            } else if (memory.endsWith("k") || memory.endsWith("kb")) {
+                return Long.parseLong(memory.replaceAll("[^0-9]", "")) * 1024L;
+            }
+            return Long.parseLong(memory);
+        } catch (NumberFormatException e) {
+            log.warn("无法解析内存大小: {}, 使用默认 512m", memory);
+            return 512L * 1024 * 1024;
+        }
     }
 }

@@ -23,12 +23,11 @@ import java.time.Duration;
 @Component
 public class RateLimitFilter implements Filter {
 
-    @Value("${ratelimit.max-requests-per-minute:100}")
-
     private final Cache<String, Bucket> buckets = Caffeine.newBuilder()
             .expireAfterAccess(Duration.ofMinutes(10))
             .maximumSize(10000)
             .build();
+    @Value("${ratelimit.max-requests-per-minute:100}")
     private int maxRequestsPerMinute;
 
 

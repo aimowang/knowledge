@@ -32,9 +32,6 @@ public class AgentConfig {
     // ── 质量保障配置 ──
     private Quality quality = new Quality();
 
-    // ── Hook 管道配置 ──
-    private Hook hook = new Hook();
-
     // ── 沙箱配置 ──
     private Sandbox sandbox = new Sandbox();
 
@@ -149,42 +146,6 @@ public class AgentConfig {
                 private double answerRelevancy = 0.6;
                 private double citationGrounding = 0.8;
             }
-        }
-    }
-
-
-    @Data
-    public static class Hook {
-        private Compaction compaction = new Compaction();
-        private TokenCounter tokenCounter = new TokenCounter();
-        private RateLimit rateLimit = new RateLimit();
-        private Safety safety = new Safety();
-
-        @Data
-        public static class Compaction {
-            private boolean enabled = true;
-            private int maxHistoryLength = 50;
-            private int maxTokens = 4096;
-            private String strategy = "semantic";
-            private int preserveLastN = 5;
-        }
-
-        @Data
-        public static class TokenCounter {
-            private boolean enabled = true;
-            private int maxPromptTokens = 8192;
-            private int maxResponseTokens = 2048;
-        }
-
-        @Data
-        public static class RateLimit {
-            private boolean enabled = false;
-            private int maxCallsPerMinute = 30;
-        }
-
-        @Data
-        public static class Safety {
-            private boolean enabled = false;
         }
     }
 

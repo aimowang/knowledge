@@ -50,7 +50,7 @@ spring:
           max-wait: -1ms
   ai:
     dashscope:
-      api-key: sk-你的DashScope密钥
+      api-key: sk-ff8f2b4d486b4a759eb4acd0fdca5914
       chat:
         enabled: true
         options:

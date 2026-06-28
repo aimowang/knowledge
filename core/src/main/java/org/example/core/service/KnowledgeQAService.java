@@ -80,11 +80,12 @@ public class KnowledgeQAService {
     }
 
     private RagFlow selectRagFlow(String category) {
-//        for (RagFlow ragFlow : ragFlows) {
-//            if (ragFlow.support().contains(category)) {
-//                return ragFlow;
-//            }
-//        }
+        for (RagFlow ragFlow : ragFlows) {
+            if (ragFlow.support().contains(category)) {
+                return ragFlow;
+            }
+        }
+        // fallback: 返回默认的 AdvancedRagFlow
         for (RagFlow ragFlow : ragFlows) {
             if (ragFlow instanceof AdvancedRagFlow) {
                 return ragFlow;
@@ -112,39 +113,63 @@ public class KnowledgeQAService {
         askRequest.setUserId(request.getUserId());
         askRequest.setQuestion(request.getQuestion());
 
-        // 如果请求中有自定义配置，临时覆盖
-        if (request.getConfig() != null) {
-            if (request.getConfig().getForceAgentic() != null) {
-                agentConfig.getRouting().setForceAgentic(
-                    request.getConfig().getForceAgentic());
+        // 安全应用请求级配置覆盖（保存并恢复，避免线程安全问题）
+        Boolean savedForceAgentic = null;
+        Boolean savedExternalSearch = null;
+        try {
+            if (request.getConfig() != null) {
+                if (request.getConfig().getForceAgentic() != null) {
+                    savedForceAgentic = agentConfig.getRouting().isForceAgentic();
+                    agentConfig.getRouting().setForceAgentic(
+                        request.getConfig().getForceAgentic());
+                }
+                if (request.getConfig().getEnableExternalSearch() != null) {
+                    savedExternalSearch = agentConfig.getTool().getExternalSearch().isEnabled();
+                    agentConfig.getTool().getExternalSearch().setEnabled(
+                        request.getConfig().getEnableExternalSearch());
+                }
             }
-            if (request.getConfig().getEnableExternalSearch() != null) {
-                agentConfig.getTool().getExternalSearch().setEnabled(
-                    request.getConfig().getEnableExternalSearch());
+
+            // 路由执行
+            RagAnswer answer = queryRouter.route(askRequest);
+
+            // 构建 Agentic 响应
+            AgenticAskResponse response = AgenticAskResponse.builder()
+                .answer(answer.getAnswer())
+                .sources(answer.getSources())
+                .agenticMode(true)
+                .totalDurationMs(0)
+                .build();
+
+            // 从 answer metadata 中提取 Agent 执行信息
+            if (answer.getMetadata() != null) {
+                java.util.Map<String, String> meta = answer.getMetadata();
+                if (meta.containsKey("trajectoryId"))
+                    response.setTrajectoryId(meta.get("trajectoryId"));
+                if (meta.containsKey("loopCount"))
+                    response.setLoopCount(Integer.parseInt(meta.get("loopCount")));
+                if (meta.containsKey("totalDurationMs"))
+                    response.setTotalDurationMs(Long.parseLong(meta.get("totalDurationMs")));
+                if (meta.containsKey("faithfulness") || meta.containsKey("answerRelevancy")) {
+                    java.util.Map<String, Double> scores = new java.util.HashMap<>();
+                    if (meta.containsKey("faithfulness"))
+                        scores.put("faithfulness", Double.parseDouble(meta.get("faithfulness")));
+                    if (meta.containsKey("answerRelevancy"))
+                        scores.put("answerRelevancy", Double.parseDouble(meta.get("answerRelevancy")));
+                    response.setQualityScores(scores);
+                }
+            }
+
+            return response;
+        } finally {
+            // 恢复原始配置（确保即使异常也能恢复）
+            if (savedForceAgentic != null) {
+                agentConfig.getRouting().setForceAgentic(savedForceAgentic);
+            }
+            if (savedExternalSearch != null) {
+                agentConfig.getTool().getExternalSearch().setEnabled(savedExternalSearch);
             }
         }
-
-        // 路由执行
-        RagAnswer answer = queryRouter.route(askRequest);
-
-        // 构建 Agentic 响应
-        AgenticAskResponse response = AgenticAskResponse.builder()
-            .answer(answer.getAnswer())
-            .sources(answer.getSources())
-            .agenticMode(true)
-            .totalDurationMs(0)
-            .build();
-
-        // 从 answer metadata 中提取 Agent 执行信息
-        if (answer.getMetadata() != null) {
-            java.util.Map<String, String> meta = answer.getMetadata();
-            if (meta.containsKey("trajectoryId"))
-                response.setTrajectoryId(meta.get("trajectoryId"));
-            if (meta.containsKey("loopCount"))
-                response.setLoopCount(Integer.parseInt(meta.get("loopCount")));
-        }
-
-        return response;
     }
 
     // ════════════════════════════════════════════════════════════
