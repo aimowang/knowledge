@@ -262,4 +262,22 @@ public class KnowledgeQAController {
 
         return emitter;
     }
+
+    /**
+     * Agentic RAG 流式问答（GET/SSE）— 供前端 EventSource API 使用。
+     * <p>参数通过查询字符串传递：question=xxx&amp;userId=xxx</p>
+     */
+    @GetMapping("/ask/agent/stream")
+    @Operation(summary = "Agentic RAG 流式问答（GET/SSE）",
+               description = "支持 GET 方式的 SSE 流式接口，通过查询字符串传递参数")
+    public SseEmitter askWithAgentStreamGet(
+            @RequestParam(defaultValue = "anonymous") String userId,
+            @RequestParam String question) {
+
+        AgenticAskRequest request = new AgenticAskRequest();
+        request.setUserId(userId);
+        request.setQuestion(question);
+
+        return askWithAgentStream(request);
+    }
 }
