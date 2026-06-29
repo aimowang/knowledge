@@ -492,7 +492,32 @@ public class AgentOrchestrator {
             // ── 最终: 发射答案 ──
             state.setFinalAnswer(state.getDraftAnswer());
             state.setStatus(AgentStatus.COMPLETED);
-            onEvent.accept(StreamEvent.done(state.getFinalAnswer()));
+            state.setTotalDurationMs(state.getElapsedMs());
+            // done 事件发送 JSON 格式元数据（给前端展示轨迹和评分）
+            try {
+                java.util.Map<String, Object> doneData = new java.util.LinkedHashMap<>();
+                doneData.put("answer", state.getFinalAnswer());
+                doneData.put("trajectoryId", state.getTrajectoryId() != null ? state.getTrajectoryId() : "");
+                doneData.put("loopCount", state.getLoopCount());
+                doneData.put("totalDurationMs", state.getTotalDurationMs());
+                if (state.getSources() != null && !state.getSources().isEmpty()) {
+                    doneData.put("sources", state.getSources().stream()
+                        .map(d -> d.getMetadata() != null
+                            ? d.getMetadata().getOrDefault("source",
+                               d.getMetadata().getOrDefault("file_name", d.getText().substring(0, Math.min(50, d.getText().length()))))
+                            : d.getText().substring(0, Math.min(50, d.getText().length())))
+                        .collect(java.util.stream.Collectors.toList()));
+                }
+                if (state.getQualityScores() != null) {
+                    java.util.Map<String, Double> scores = new java.util.LinkedHashMap<>();
+                    scores.put("faithfulness", state.getQualityScores().getFaithfulness());
+                    doneData.put("qualityScores", scores);
+                }
+                onEvent.accept(StreamEvent.done(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(doneData)));
+            } catch (Exception e) {
+                log.warn("序列化 done 事件失败: {}", e.getMessage());
+                onEvent.accept(StreamEvent.done(state.getFinalAnswer()));
+            }
 
         } catch (TimeoutException e) {
             onEvent.accept(StreamEvent.error("处理超时，请简化问题后重试"));

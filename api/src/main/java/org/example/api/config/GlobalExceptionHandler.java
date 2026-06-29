@@ -1,6 +1,7 @@
 package org.example.api.config;
 
 import jakarta.validation.ConstraintViolationException;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.example.model.ErrorResponse;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -112,6 +113,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneralException(Exception e, WebRequest request) {
+        // 若响应已提交（如 SSE 流中出错），不修改响应，仅记录日志
+        if (request instanceof ServletWebRequest sw) {
+            jakarta.servlet.http.HttpServletResponse resp = sw.getResponse();
+            if (resp != null && resp.isCommitted()) {
+                log.error("SSE/异步流处理异常（响应已提交，无法返回错误）: {}", e.getMessage());
+                return null;
+            }
+        }
         log.error("服务器内部错误", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new ErrorResponse(500, "服务器内部错误", "服务器内部错误，请稍后重试", getPath(request)));
